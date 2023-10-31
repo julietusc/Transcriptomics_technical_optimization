@@ -1,0 +1,751 @@
+---
+title: "Visium Deconvolution"
+author: "Sarah Bangerth"
+date: "2023-10-31"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Set Working Directory
+setwd('/users/sarahbangerth/Desktop/Github/Transcriptomics_technical_optimization/')
+
+# Libraries
+library(tidyverse)
+library(dplyr)
+library(Seurat)
+library(DropletUtils)
+library(ggplot2)
+library(pathfindR)
+library(SeuratDisk)
+library(CellTrek)
+```
+
+# Read in data (only OCT samples)
+
+```{r}
+# Normal
+spatial_norm = Read10X_Image(image.dir = "Data/Spatial/Normal_oct/spatial",
+                           filter.matrix = TRUE)
+
+spatial_norm = Load10X_Spatial(data.dir = "Data/Spatial/Normal_oct",
+  filename = "filtered_feature_bc_matrix.h5",
+  assay = "spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL)
+
+## BA
+spatial_ba = Read10X_Image(image.dir = "Data/Spatial/BA_oct/spatial",
+                           filter.matrix = TRUE)
+
+spatial_ba = Load10X_Spatial(data.dir = "Data/Spatial/BA_oct",
+  filename = "filtered_feature_bc_matrix.h5",
+  assay = "spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL)
+```
+
+# Quality Control - Spatial Spots
+
+Calculate percentage mitochondria for each sample
+
+```{r}
+spatial_norm[["percent.mt"]] = PercentageFeatureSet(spatial_norm, pattern = "^MT-")
+spatial_ba[["percent.mt"]] = PercentageFeatureSet(spatial_ba, pattern = "^MT-")
+```
+
+Filter out genes were ratio of mitochondria is above 10%. Only keep spots with at least 200 genes.
+
+```{r}
+spatial_norm = subset(spatial_norm, percent.mt < 10 & nFeature_spatial > 200)
+spatial_ba = subset(spatial_ba, percent.mt < 10 & nFeature_spatial > 200)
+```
+
+### Quality Control - Genes
+
+Exclude mitochondria, HSP and ribosomal genes from features.
+
+```{r}
+MT.indexnorm = grep(pattern = "^MT-", x = rownames(spatial_norm), value = FALSE) # Select row indices and not MT names
+HSP.indexnorm = grep(pattern = "^HSP", x = rownames(spatial_norm), value = FALSE) 
+MRP.indexnorm = grep(pattern = "^MRP", x = rownames(spatial_norm), value = FALSE) 
+RPL.indexnorm = grep(pattern = "^RPL", x = rownames(spatial_norm), value = FALSE) 
+RPS.indexnorm = grep(pattern = "^RPS", x = rownames(spatial_norm), value = FALSE) 
+
+spatial_norm = spatial_norm[-c(MT.indexnorm,HSP.indexnorm,MRP.indexnorm,RPL.indexnorm,RPS.indexnorm), ]
+
+
+MT.indexba = grep(pattern = "^MT-", x = rownames(spatial_ba), value = FALSE) # Select row indices and not MT names
+HSP.indexba = grep(pattern = "^HSP", x = rownames(spatial_ba), value = FALSE) 
+MRP.indexba = grep(pattern = "^MRP", x = rownames(spatial_ba), value = FALSE) 
+RPL.indexba = grep(pattern = "^RPL", x = rownames(spatial_ba), value = FALSE) 
+RPS.indexba = grep(pattern = "^RPS", x = rownames(spatial_ba), value = FALSE) 
+
+spatial_ba = spatial_ba[-c(MT.indexba,HSP.indexba,MRP.indexba,RPL.indexba,RPS.indexba), ]
+```
+
+Extract gene names that are present in at least one spatial count. Exclude genes not present in any spatial spot.
+
+```{r}
+count_matrix_norm = as.data.frame(spatial_norm[['spatial']]@counts)
+genes_norm = count_matrix_norm %>% filter(rowSums(count_matrix_norm)>=1) %>% rownames()
+
+spatial_norm = spatial_norm[c(genes_norm), ]
+
+
+count_matrix_ba = as.data.frame(spatial_ba[['spatial']]@counts)
+genes_ba = count_matrix_ba %>% filter(rowSums(count_matrix_ba)>=1) %>% rownames()
+
+spatial_ba = spatial_ba[c(genes_ba), ]
+```
+
+# SCTransform
+
+```{r}
+spatial_norm = SCTransform(spatial_norm, assay = "spatial", verbose = FALSE)
+spatial_ba = SCTransform(spatial_ba, assay = "spatial", verbose = FALSE)
+```
+
+Identification of highly variable features
+
+```{r}
+spatial_norm = FindVariableFeatures(spatial_norm, selection.method = "vst", nfeatures = 3000)
+spatial_ba = FindVariableFeatures(spatial_ba, selection.method = "vst", nfeatures = 3000)
+```
+
+# Load labelled snRNA data
+
+```{r}
+liver_sc_normal = LoadH5Seurat("Data/snRNA/sn_normal_labelled.h5seurat")
+liver_sc_ba = LoadH5Seurat("Data/snRNA/sn_ba_labelled.h5seurat", tools=FALSE)
+```
+
+# DECONVOLUTION
+
+Get data ready for deconvolution
+
+```{r}
+spatial_norm <- RenameCells(spatial_norm, new.names=make.names(Cells(spatial_norm)))
+liver_sc_normal <- RenameCells(liver_sc_normal, new.names=make.names(Cells(liver_sc_normal)))
+if( "original" %in% colnames(liver_sc_normal@meta.data) )
+{
+  colnames( liver_sc_normal@meta.data )[ colnames( liver_sc_normal@meta.data ) == "original"] = "orig.ident"
+}
+
+spatial_ba <- RenameCells(spatial_ba, new.names=make.names(Cells(spatial_ba)))
+liver_sc_ba <- RenameCells(liver_sc_ba, new.names=make.names(Cells(liver_sc_ba)))
+if( "original" %in% colnames(liver_sc_ba@meta.data) )
+{
+  colnames( liver_sc_ba@meta.data )[ colnames( liver_sc_ba@meta.data ) == "original"] = "orig.ident"
+}
+
+#select integrated model
+liver_sc_normal[['SCT']]@SCTModel.list$model1.1 = NULL
+liver_sc_ba[['SCT']]@SCTModel.list$model1 = NULL
+```
+
+## CellTrek
+CellTrek is a package to deconvolute the spatial spots with the single nucleus data. This assigns the most likely nucleus to a spatial spot. GitHub: https://github.com/navinlabcode/CellTrek
+
+Output: nuclei / cells are given spatial coordinates on the tissue sample. 
+
+### Normal Liver
+
+Train the model
+
+```{r}
+traint_nl <- CellTrek::traint(st_data=spatial_norm, 
+                           sc_data=liver_sc_normal, 
+                           sc_assay='SCT',
+                           st_assay='SCT',
+                           norm = 'SCT',
+                           cell_names='celltype',
+                           recompute.residuals = FALSE)
+
+DimPlot(traint_nl, group.by = "type") 
+```
+
+Now we apply the trained model to our data. The output of this method is that each single cell / single nucleus will now have (x,y) spatial coordinates on the tissue. This step takes awhile!
+
+```{r}
+liver_celltrek_normal <- CellTrek::celltrek(
+            st_sc_int=traint_nl, 
+            int_assay='traint', 
+            sc_data=liver_sc_normal, 
+            sc_assay = 'SCT', 
+            reduction='pca', 
+            intp=T, 
+            intp_pnt=5000, 
+            intp_lin=F, 
+            nPCs=30, 
+            ntree=1000, 
+            dist_thresh=0.55, 
+            top_spot=5, 
+            spot_n=5, 
+            repel_r=20, 
+            repel_iter=20, 
+            keep_model=T)$celltrek
+
+#convert the cell type, or cluster label, to a factor datatype 
+liver_celltrek_normal$celltype <-
+          factor(liver_celltrek_normal$celltype,
+                 levels=sort(unique(liver_celltrek_normal$celltype)))
+```
+
+Now we can visualize the deconvolution via a shiny app
+
+```{r, results="hide"}
+CellTrek::celltrek_vis(
+  liver_celltrek_normal@meta.data %>% dplyr::select(coord_x, coord_y, celltype:id_new, seurat_clusters),
+  liver_celltrek_normal@images$slice1@image, 
+  liver_celltrek_normal@images$slice1@scale.factors$lowres)
+```
+
+We can now look at the colocalization patterns between different cell types. 
+
+CellTrek recommends removing cell types with very few cells (n < 20).
+
+```{r}
+liver_sgraph_KL_norm <- CellTrek::scoloc(liver_celltrek_normal, col_cell='celltype', use_method='KL', eps=1e-50)
+
+liver_sgraph_KL_mst_cons_norm <- liver_sgraph_KL_norm$mst_cons
+
+#some renaming for visual preferences
+new_row_names <- c( str_replace_all( rownames( liver_sgraph_KL_mst_cons_norm) , "\\.", " " ) )
+new_row_names[ new_row_names == "B Plasma Cells" ] <- "B/Plasma Cells"
+new_row_names[ new_row_names == "HSC Fibroblasts" ] <- "HSC/Fibroblasts"
+new_row_names[ new_row_names == "LSEC Zone 2 3 1" ] <- "LSEC Zone 2&3 1"
+new_row_names[ new_row_names == "LSEC Zone 2 3 2" ] <- "LSEC Zone 2&3 2"
+new_row_names[ new_row_names == "LSEC Zone 2 3 3" ] <- "LSEC Zone 2&3 3"
+new_row_names[ new_row_names == "T NK Cells" ] <- "T/NK Cells"
+
+rownames(liver_sgraph_KL_mst_cons_norm) <- new_row_names
+colnames(liver_sgraph_KL_mst_cons_norm) <- rownames(liver_sgraph_KL_mst_cons_norm) 
+
+liver_cell_class_norm <- liver_celltrek_normal@meta.data %>% dplyr::select(id=celltype) %>% unique
+liver_celltrek_count_norm <- data.frame(freq = table(liver_celltrek_normal$celltype))
+liver_cell_class_new_norm <- merge(liver_cell_class_norm, liver_celltrek_count_norm, by.x ="id", by.y = "freq.Var1")
+```
+
+Visualize results using a shiny app
+
+```{r, results='hide'}
+CellTrek::scoloc_vis(liver_sgraph_KL_mst_cons_norm, meta_data=liver_cell_class_new_norm)
+```
+
+### Biliary Atresia
+
+Train the model
+
+```{r}
+traint_ba <- CellTrek::traint(st_data=spatial_ba, 
+                           sc_data=liver_sc_ba, 
+                           sc_assay='SCT',
+                           st_assay='SCT',
+                           norm = 'SCT',
+                           cell_names='celltype',
+                           recompute.residuals = FALSE)
+```
+
+Check that single nucleus and spatial data overlap
+
+```{r}
+DimPlot(traint_ba, group.by = "type") 
+```
+
+Apply the model
+
+```{r}
+liver_celltrek_ba <- CellTrek::celltrek(
+            st_sc_int=traint_ba, 
+            int_assay='traint', 
+            sc_data=liver_sc_ba, 
+            sc_assay = 'SCT', 
+            reduction='pca', 
+            intp=T, 
+            intp_pnt=5000, 
+            intp_lin=F, 
+            nPCs=30, 
+            ntree=1000, 
+            dist_thresh=0.55, 
+            top_spot=5, 
+            spot_n=5, 
+            repel_r=20, 
+            repel_iter=20, 
+            keep_model=T)$celltrek
+
+#convert the cell type, or cluster label, to a factor datatype 
+liver_celltrek_ba$celltype <-
+          factor(liver_celltrek_ba$celltype,
+                 levels=sort(unique(liver_celltrek_ba$celltype)))
+
+```
+
+Visualize results!
+
+```{r, results="hide"}
+CellTrek::celltrek_vis(
+  liver_celltrek_ba@meta.data %>% dplyr::select(coord_x, coord_y, celltype:id_new, seurat_clusters ),
+  liver_celltrek_ba@images$slice1@image, 
+  liver_celltrek_ba@images$slice1@scale.factors$lowres)
+```
+
+We can now look at the colocalization patterns between different cell types. CellTrek recommends removing cell types with very few cells (n < 20)
+
+```{r}
+liver_sgraph_KL_ba <- CellTrek::scoloc(liver_celltrek_ba, col_cell='celltype', use_method='KL', eps=1e-50)
+
+liver_sgraph_KL_mst_cons_ba <- liver_sgraph_KL_ba$mst_cons
+
+#renaming for visual preference
+new_row_names <- c( str_replace_all( rownames( liver_sgraph_KL_mst_cons_ba) , "\\.", " " ) )
+new_row_names[ new_row_names == "B Plasma Cells" ] <- "B/Plasma Cells"
+new_row_names[ new_row_names == "HSC Fibroblasts" ] <- "HSC/Fibroblasts"
+new_row_names[ new_row_names == "LSEC Zone 2 3 1" ] <- "LSEC Zone 2&3 1"
+new_row_names[ new_row_names == "LSEC Zone 2 3 2" ] <- "LSEC Zone 2&3 2"
+new_row_names[ new_row_names == "LSEC Zone 2 3 3" ] <- "LSEC Zone 2&3 3"
+new_row_names[ new_row_names == "T NK Cells" ] <- "T/NK Cells"
+
+rownames(liver_sgraph_KL_mst_cons_ba) <- new_row_names
+colnames(liver_sgraph_KL_mst_cons_ba) <- rownames(liver_sgraph_KL_mst_cons_ba) 
+
+liver_cell_class_ba <- liver_celltrek_ba@meta.data %>% dplyr::select(id=celltype) %>% unique
+liver_celltrek_count_ba <- data.frame(freq = table(liver_celltrek_ba$celltype))
+liver_cell_class_new_ba <- merge(liver_cell_class_ba, liver_celltrek_count_ba, by.x ="id", by.y = "freq.Var1")
+```
+
+Visualize results using a shiny app
+
+```{r, results='hide'}
+CellTrek::scoloc_vis(liver_sgraph_KL_mst_cons_ba, meta_data=liver_cell_class_new_ba)
+```
+
+# Save spatially deconvoluted objects
+
+```{r}
+as.h5Seurat(x = liver_celltrek_normal, filename = "liver_celltrek_normal" ,overwrite = TRUE)
+as.h5Seurat(x = liver_celltrek_ba, filename = "liver_celltrek_ba" ,overwrite = TRUE)
+```
+
+# Visualize spatially deconvoluted samples [Fig 4c-d, Fig 5c-d]
+
+```{r}
+SpatialDimPlot(liver_celltrek_ba, group.by='celltype', crop=F, pt.size.factor = 0.8) + 
+  scale_fill_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"
+                              ))
+SpatialDimPlot(liver_celltrek_normal, group.by='celltype', crop=F, pt.size.factor = 0.8) + 
+  scale_fill_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"
+                              ))
+
+#########################################
+# Visualize all cell types individually #
+#########################################
+
+## B/Plasma
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('B/Plasma Cells')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + 
+  scale_fill_manual(values = c("#ccff00"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('B/Plasma Cells')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#ccff00"))
+
+## Hep progenitor
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('Hepatocyte Progenitor')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c('red'))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('Hepatocyte Progenitor')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c('red'))
+
+## Endo progenitor
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('Endothelial Progenitor')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c('#FFEA00'))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('Endothelial Progenitor')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c('#FFEA00'))
+
+## Kupffer
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('Kupffer Cells')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#8b008b"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('Kupffer Cells')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#8b008b"))
+
+## T/NK
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('T/NK Cells')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#bf812d"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('T/NK Cells')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#bf812d"))
+
+## Chol
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('Cholangiocytes')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#ff6961"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('Cholangiocytes')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#ff6961"))
+
+## LSEC zone 1
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('LSEC Zone 1')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#313695"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('LSEC Zone 1')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#313695"))
+
+## LSEC zone 2&3 1
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 1')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#0096FF"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 1')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#0096FF"))
+
+## LSEC zone 2&3 2
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 2')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#FF7518"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 2')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#FF7518"))
+
+## LSEC zone 2&3 3
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 3')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("orange"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 3')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("orange"))
+
+## Portal Endo
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('Portal Endothelial')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#800000"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('Portal Endothelial')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#800000"))
+
+## HSC
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('HSC/Fibroblasts')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#ff00ff"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('HSC/Fibroblasts')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#ff00ff"))
+
+## CV 1
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('CV 1')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#333333"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('CV 1')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#333333"))
+
+## CV 2
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('CV 2')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("black"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('CV 2')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("black"))
+
+## IZ 1
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('IZ 1')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#808080"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('IZ 1')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#808080"))
+
+## IZ 2
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('IZ 2')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#dcdcdc"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('IZ 2')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#dcdcdc"))
+
+## IZ 3
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('IZ 3')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#c4c3d0"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('IZ 3')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#c4c3d0"))
+
+## IZ 4
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('IZ 4')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#b2beb5"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('IZ 4')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#b2beb5"))
+
+## IZ 5
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('IZ 5')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("darkgray"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('IZ 5')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("darkgray"))
+
+## IZ 6
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('IZ 6')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("gray"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('IZ 6')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("gray"))
+
+## PP 1
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('PP 1')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#faf0e6"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('PP 1')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#faf0e6"))
+
+## PP 2
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('PP 2')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#f5deb3"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('PP 2')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#f5deb3"))
+
+## PP 3
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('PP 3')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#918151"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('PP 3')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#918151"))
+
+## PP 4
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('PP 4')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#c3b091"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('PP 4')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#c3b091"))
+```
+
+
+# Correlation plots [Fig 3e]
+
+```{r}
+library("RColorBrewer")
+library(GGally)
+# devtools::install_github("briatte/ggnet")
+library(ggnet)
+library(sna)
+library(network)
+
+library(pracma)
+library(igraph)
+library(ggraph)
+```
+
+```{r}
+library(reshape2)
+
+##########
+# NORMAL #
+##########
+
+head(liver_sgraph_KL_mst_cons_norm)
+liver_sgraph_KL_mst_cons_norm$from_label = rownames(liver_sgraph_KL_mst_cons_norm)
+
+network_normal = melt(liver_sgraph_KL_mst_cons_norm, id.vars = c('from_label'), 
+                           measure.vars = colnames(liver_sgraph_KL_mst_cons_norm))
+head(network_normal)
+colnames(network_normal) = c('from_label','to_label','value')
+write_csv(network_normal,'network_normal.csv')
+
+# Read in formatted data
+graph_data_normal = read_csv('network_normal_ready.csv')
+head(graph_data_normal)
+
+graph_data_normal = graph_data_normal %>% filter(!from_label == to_label)
+
+graph_data_normal$value
+graph_data_normal[(graph_data_normal$value<0.05),]$value = 0.01
+graph_data_normal$value
+
+norm_network = graph_from_data_frame(graph_data_normal, directed=FALSE)
+
+# Add type of interaction (edge color)
+ecol_norm=E(norm_network)$value
+ecol_norm[ecol_norm > 0.01] = 'gray'
+ecol_norm[ecol_norm == 0.01] = 'transparent'
+
+# Add meta-cluster grouping colors
+vgroup_norm=V(norm_network)$name
+
+vgroup_norm[vgroup_norm == 'B/Plasma Cells'] = "#ccff00"
+vgroup_norm[vgroup_norm == 'Cholangiocytes'] = "#ff6961"
+vgroup_norm[vgroup_norm == 'CV 1'] = "#333333"
+vgroup_norm[vgroup_norm == 'CV 2'] = "black"
+vgroup_norm[vgroup_norm == 'Endothelial Progenitor'] = "#FFEA00"
+vgroup_norm[vgroup_norm == 'Hepatocyte Progenitor'] = "red"
+vgroup_norm[vgroup_norm == 'HSC/Fibroblasts'] = "#ff00ff"
+vgroup_norm[vgroup_norm == 'IZ 1'] = "#808080"
+vgroup_norm[vgroup_norm == 'IZ 2'] = "#dcdcdc"
+vgroup_norm[vgroup_norm == 'IZ 3'] = "#c4c3d0"
+vgroup_norm[vgroup_norm == 'IZ 4'] = "#b2beb5"
+vgroup_norm[vgroup_norm == 'IZ 5'] = "darkgray"
+vgroup_norm[vgroup_norm == 'IZ 6'] = "gray"
+vgroup_norm[vgroup_norm == 'Kupffer Cells'] = "#8b008b"
+vgroup_norm[vgroup_norm == 'LSEC Zone 1'] = "#313695"
+vgroup_norm[vgroup_norm == 'LSEC Zone 2&3 1'] = "#0096FF"
+vgroup_norm[vgroup_norm == 'LSEC Zone 2&3 2'] = "#FF7518"
+vgroup_norm[vgroup_norm == 'LSEC Zone 2&3 3'] = "orange"
+vgroup_norm[vgroup_norm == 'Portal Endothelial'] = "#800000"
+vgroup_norm[vgroup_norm == 'PP 1'] = "#faf0e6"
+vgroup_norm[vgroup_norm == 'PP 2'] = "#f5deb3"
+vgroup_norm[vgroup_norm == 'PP 3'] = "#918151"
+vgroup_norm[vgroup_norm == 'PP 4'] = "#c3b091"
+vgroup_norm[vgroup_norm == 'T/NK Cells'] = "#bf812d"
+  
+V(norm_network)$Group = vgroup_norm
+
+set.seed(23)
+plot(norm_network, 
+    vertex.size = 20,
+    vertex.label.cex=1.2,
+    vertex.label.dist = -2.2,
+    vertex.label.degree = -pi/2,
+    vertex.label.family='Arial',
+    vertex.color = V(norm_network)$Group,
+    edge.color = ecol_norm,
+    vertex.label.color="black",
+    vertex.frame.color="black", 
+    edge.width = 5 * (unlist(edge_attr(norm_network)))
+    ) 
+
+##########
+### BA ###
+##########
+
+head(liver_sgraph_KL_mst_cons_ba)
+liver_sgraph_KL_mst_cons_ba$from_label = rownames(liver_sgraph_KL_mst_cons_ba)
+
+network_ba = melt(liver_sgraph_KL_mst_cons_ba, id.vars = c('from_label'), 
+                           measure.vars = colnames(liver_sgraph_KL_mst_cons_ba))
+head(network_ba)
+colnames(network_ba) = c('from_label','to_label','value')
+write_csv(network_ba,'network_ba.csv')
+
+
+# Read in formatted data
+graph_data_ba = read_csv('network_ba_ready.csv')
+head(graph_data_ba)
+
+graph_data_ba = graph_data_ba %>% filter(!from_label == to_label)
+
+graph_data_ba$value
+graph_data_ba[(graph_data_ba$value<0.05),]$value = 0.01
+graph_data_ba$value
+
+ba_network = graph_from_data_frame(graph_data_ba, directed=FALSE)
+
+# Add type of interaction (edge color)
+ecol_ba=E(ba_network)$value
+ecol_ba[ecol_ba > 0.01] = 'gray'
+ecol_ba[ecol_ba == 0.01] = 'transparent'
+
+# Add meta-cluster grouping colors
+vgroup_ba=V(ba_network)$name
+
+vgroup_ba[vgroup_ba == 'B/Plasma Cells'] = "#ccff00"
+vgroup_ba[vgroup_ba == 'Cholangiocytes'] = "#ff6961"
+vgroup_ba[vgroup_ba == 'CV 1'] = "#333333"
+vgroup_ba[vgroup_ba == 'CV 2'] = "black"
+vgroup_ba[vgroup_ba == 'Endothelial Progenitor'] = "#FFEA00"
+vgroup_ba[vgroup_ba == 'Hepatocyte Progenitor'] = "red"
+vgroup_ba[vgroup_ba == 'HSC/Fibroblasts'] = "#ff00ff"
+vgroup_ba[vgroup_ba == 'IZ 1'] = "#808080"
+vgroup_ba[vgroup_ba == 'IZ 2'] = "#dcdcdc"
+vgroup_ba[vgroup_ba == 'IZ 3'] = "#c4c3d0"
+vgroup_ba[vgroup_ba == 'IZ 4'] = "#b2beb5"
+vgroup_ba[vgroup_ba == 'IZ 5'] = "darkgray"
+vgroup_ba[vgroup_ba == 'IZ 6'] = "gray"
+vgroup_ba[vgroup_ba == 'Kupffer Cells'] = "#8b008b"
+vgroup_ba[vgroup_ba == 'LSEC Zone 1'] = "#313695"
+vgroup_ba[vgroup_ba == 'LSEC Zone 2&3 1'] = "#0096FF"
+vgroup_ba[vgroup_ba == 'LSEC Zone 2&3 2'] = "#FF7518"
+vgroup_ba[vgroup_ba == 'LSEC Zone 2&3 3'] = "orange"
+vgroup_ba[vgroup_ba == 'Portal Endothelial'] = "#800000"
+vgroup_ba[vgroup_ba == 'PP 1'] = "#faf0e6"
+vgroup_ba[vgroup_ba == 'PP 2'] = "#f5deb3"
+vgroup_ba[vgroup_ba == 'PP 3'] = "#918151"
+vgroup_ba[vgroup_ba == 'PP 4'] = "#c3b091"
+vgroup_ba[vgroup_ba == 'T/NK Cells'] = "#bf812d"
+  
+V(ba_network)$Group = vgroup_ba
+
+set.seed(23)
+plot(ba_network, 
+    vertex.size = 20,
+    vertex.label.cex=1.2,
+    vertex.label.dist = -2.2,
+    vertex.label.degree = -pi/2,
+    vertex.label.family='Arial',
+    vertex.color = V(ba_network)$Group,
+    edge.color = ecol_norm,
+    vertex.label.color="black",
+    vertex.frame.color="black", 
+    edge.width = 5 * (unlist(edge_attr(ba_network)))
+    ) 
+```
+

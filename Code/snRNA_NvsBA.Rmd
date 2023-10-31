@@ -1,0 +1,595 @@
+---
+title: "snRNA Normal vs BA"
+author: "Sarah Bangerth"
+date: "2023-10-31"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, results=FALSE}
+setwd('/users/sarahbangerth/Desktop/Github/Transcriptomics_technical_optimization/')
+
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(pathfindR)
+# remotes::install_github("mojaveazure/seurat-disk")
+library(SeuratDisk)
+# devtools::install_github("rpolicastro/scProportionTest")
+library("scProportionTest")
+```
+
+# Read in the filtered matrix
+
+```{r}
+sn_raw_file_norm = Read10X_h5('Data/snRNA/Normal/filtered_feature_bc_matrix.h5', 
+                               use.names = TRUE, unique.features = TRUE)
+
+sn_raw_file_ba = Read10X_h5('Data/snRNA/BA/filtered_feature_bc_matrix.h5', 
+                               use.names = TRUE, unique.features = TRUE)
+```
+
+Create a seurat object
+
+```{r}
+sn_norm = CreateSeuratObject(counts = sn_raw_file_norm)
+sn_ba = CreateSeuratObject(counts = sn_raw_file_ba)
+```
+
+# Quality control
+
+Calculate the percentage of mitochondrial counts
+
+```{r}
+# Normal 1
+sn_norm[["percent.mt"]] <- PercentageFeatureSet(sn_norm, pattern = "^MT-")
+VlnPlot(sn_norm, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+plot1 <- FeatureScatter(sn_norm, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(sn_norm, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+# BA
+sn_ba[["percent.mt"]] <- PercentageFeatureSet(sn_ba, pattern = "^MT-")
+VlnPlot(sn_ba, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+plot1 <- FeatureScatter(sn_ba, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(sn_ba, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+
+```{r}
+sn_norm <- subset(sn_norm, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+sn_ba <- subset(sn_ba, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+```
+
+Remove mitochondrial genes, HSP?, MRP?, RPL?, RPS?
+
+```{r}
+# Normal 1
+MT.index = grep(pattern = "^MT-", x = rownames(sn_norm), value = FALSE) # Select row indices and not MT names
+HSP.index = grep(pattern = "^HSP", x = rownames(sn_norm), value = FALSE) 
+MRP.index = grep(pattern = "^MRP", x = rownames(sn_norm), value = FALSE) 
+RPL.index = grep(pattern = "^RPL", x = rownames(sn_norm), value = FALSE) 
+RPS.index = grep(pattern = "^RPS", x = rownames(sn_norm), value = FALSE) 
+
+sn_norm = sn_norm[-c(MT.index,HSP.index,MRP.index,RPL.index,RPS.index), ]
+
+# BA
+MT.index = grep(pattern = "^MT-", x = rownames(sn_ba), value = FALSE) # Select row indices and not MT names
+HSP.index = grep(pattern = "^HSP", x = rownames(sn_ba), value = FALSE) 
+MRP.index = grep(pattern = "^MRP", x = rownames(sn_ba), value = FALSE) 
+RPL.index = grep(pattern = "^RPL", x = rownames(sn_ba), value = FALSE) 
+RPS.index = grep(pattern = "^RPS", x = rownames(sn_ba), value = FALSE) 
+
+sn_ba = sn_ba[-c(MT.index,HSP.index,MRP.index,RPL.index,RPS.index), ]
+```
+
+Filter out genes with 0 counts
+
+```{r}
+# Normal 1
+count_matrix = as.data.frame(sn_norm@assays$RNA@counts)
+median(rowSums(count_matrix)) 
+genes = count_matrix %>% filter(rowSums(count_matrix)>=1) %>% rownames()
+
+sn_norm = sn_norm[c(genes), ]
+
+# BA
+count_matrix = as.data.frame(sn_ba@assays$RNA@counts)
+median(rowSums(count_matrix)) 
+genes = count_matrix %>% filter(rowSums(count_matrix)>=1) %>% rownames()
+
+sn_ba = sn_ba[c(genes), ]
+```
+
+# Normalize the data with SCTransform
+
+```{r}
+sn_norm <- SCTransform( sn_norm, verbose = FALSE )
+sn_ba <- SCTransform( sn_ba, verbose = FALSE )
+```
+
+Finding highly variable features and plotting
+
+```{r}
+# Normal1
+sn_norm <- FindVariableFeatures(sn_norm, selection.method = "vst", nfeatures = 3000)
+
+top10 <- head(VariableFeatures(sn_norm), 10)
+plot1 <- VariableFeaturePlot(sn_norm)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2
+
+
+# BA
+sn_ba <- FindVariableFeatures(sn_ba, selection.method = "vst", nfeatures = 3000)
+
+top10 <- head(VariableFeatures(sn_ba), 10)
+plot1 <- VariableFeaturePlot(sn_ba)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2
+```
+
+# Data Integration, Cluster annotation, and Downstream Analysis
+
+```{r}
+# Add sample labels
+head(x = sn_norm[[]])
+sn_norm$original = "Normal"
+sn_norm$orig.ident = NULL
+head(x = sn_norm[[]])
+
+head(x = sn_ba[[]])
+sn_ba$original = "BA"
+sn_ba$orig.ident = NULL
+head(x = sn_ba[[]])
+
+
+# select features that are repeatedly variable across datasets for integration
+features_sn = SelectIntegrationFeatures(object.list = c(sn_norm,sn_ba), nfeatures=6000)
+
+sn_norm = PrepSCTIntegration(object.list = c(sn_norm), anchor.features = features_sn)
+sn_ba = PrepSCTIntegration(object.list = c(sn_ba), anchor.features = features_sn)
+
+
+# Perform integration
+# We then identify anchors using the FindIntegrationAnchors() function, which takes a list of Seurat objects as input, and use these anchors to integrate the two datasets together with IntegrateData().
+anchors_sn = FindIntegrationAnchors(object.list = c(sn_norm,sn_ba), normalization.method = 'SCT',
+                                 anchor.features = features_sn) # takes very long
+sn_integrated = IntegrateData(anchorset = anchors_sn, normalization.method = "SCT") #, dims = 1:30)
+
+# Perform an integrated analysis
+DefaultAssay(sn_integrated) = "integrated"
+
+# Run the standard workflow for visualization and clustering
+sn_integrated = RunPCA(sn_integrated, verbose = FALSE, seed.use = 42)
+ElbowPlot(sn_integrated)
+
+sn_integrated@assays$integrated # 16,938
+sqrt(16938) # k=130
+
+sn_integrated <- FindNeighbors(sn_integrated, dims = 1:8, k.param = 130)
+sn_integrated <- FindClusters(sn_integrated, resolution = 2.5) # Goal of about 25 clusters.
+
+sn_integrated <- RunUMAP(sn_integrated, dims = 1:8) 
+DimPlot(sn_integrated, reduction = "umap", label = TRUE, label.size = 5) + NoLegend() +
+  ggtitle("Normal and BA integrated")
+
+genes = c("HAL","AGT","SDS",# PP hep
+          "FABP1","NDUFB1", # IZ HEP
+          "CYP3A4","CYP2E1","GLUL", #CV HEP
+
+          "PECAM1","ENG","MCAM",#portal endothelial
+          "VWF","SPARCL1","CD36", #LSEC zone 1 (periportal LSEC)
+          "CLEC1B","CLEC4G","FCN2",#LSEC zone 2&3 (pericentral LSEC)
+
+          "KRT7","KRT19", #Chol
+          "HGF","VIPR1","PTH1R","COLEC11", # HSC
+          "DCN","COL1A1","COL3A1","ACTA2","MYL9", # Fibroblasts
+          "MARCO","CD163","CTSB","MSR1", # Kupffer Cells
+          "IL7R","CD2","CD3D", # T-cells
+          "LTB","IGKC","MS4A1","CD79B","IGLC2","IGHG4", #B and plasma
+          "KLRB1","NKG7", #NK
+          'LGR5','AFP',"EPCAM","SOX9",'CD34' #stem cells
+          ) 
+
+DotPlot(sn_integrated, features = genes, cols = c('yellow','blue'), assay='integrated') + 
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=0.5), 
+        axis.title=element_blank())
+
+DotPlot(sn_integrated, features = genes, cols = c('yellow','blue'), assay='RNA') + 
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=0.5), 
+        axis.title=element_blank())
+
+# DE cluster 0
+c0 = FindMarkers(sn_integrated, ident.1 = '0', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c0_top =  c0 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c0_top$gene = rownames(c0_top)
+
+DoHeatmap(sn_integrated, features = c0_top$gene, label=FALSE)
+
+# DE cluster 1
+c1 = FindMarkers(sn_integrated, ident.1 = '1', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c1_top =  c1 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c1_top$gene = rownames(c1_top)
+
+DoHeatmap(sn_integrated, features = c1_top$gene, label=FALSE)
+
+# DE cluster 4
+c4 = FindMarkers(sn_integrated, ident.1 = '4', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c4_top =  c4 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c4_top$gene = rownames(c4_top)
+
+DoHeatmap(sn_integrated, features = c4_top$gene, label=FALSE)
+
+# DE cluster 5
+c5 = FindMarkers(sn_integrated, ident.1 = '5', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c5_top =  c5 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c5_top$gene = rownames(c5_top)
+
+DoHeatmap(sn_integrated, features = c5_top$gene, label=FALSE)
+
+# DE cluster 7
+c7 = FindMarkers(sn_integrated, ident.1 = '7', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c7_top =  c7 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c7_top$gene = rownames(c7_top)
+
+DoHeatmap(sn_integrated, features = c7_top$gene, label=FALSE)
+
+# DE cluster 9
+c9 = FindMarkers(sn_integrated, ident.1 = '9', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c9_top =  c9 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c9_top$gene = rownames(c9_top)
+
+DoHeatmap(sn_integrated, features = c9_top$gene, label=FALSE)
+
+# DE cluster 11
+c11 = FindMarkers(sn_integrated, ident.1 = '11', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c11_top =  c11 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c11_top$gene = rownames(c11_top)
+
+DoHeatmap(sn_integrated, features = c11_top$gene, label=FALSE)
+
+# DE cluster 13
+c13 = FindMarkers(sn_integrated, ident.1 = '13', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c13_top =  c13 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c13_top$gene = rownames(c13_top)
+
+DoHeatmap(sn_integrated, features = c13_top$gene, label=FALSE)
+
+# DE cluster 17
+c17 = FindMarkers(sn_integrated, ident.1 = '17', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c17_top =  c17 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c17_top$gene = rownames(c17_top)
+
+DoHeatmap(sn_integrated, features = c17_top$gene, label=FALSE)
+
+# DE cluster 18
+c18 = FindMarkers(sn_integrated, ident.1 = '18', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c18_top =  c18 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c18_top$gene = rownames(c18_top)
+
+DoHeatmap(sn_integrated, features = c18_top$gene, label=FALSE)
+
+# DE cluster 19
+c19 = FindMarkers(sn_integrated, ident.1 = '19', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c19_top =  c19 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c19_top$gene = rownames(c19_top)
+
+DoHeatmap(sn_integrated, features = c19_top$gene, label=FALSE)
+
+# DE cluster 23
+c23 = FindMarkers(sn_integrated, ident.1 = '23', ident.2=NULL,
+                              only.pos = TRUE, min.pct = 0.25, 
+                              logfc.threshold = 0.25, test.use='negbinom',
+                              assay='RNA')
+
+c23_top =  c23 %>% filter(p_val_adj < 0.05) %>%
+    top_n(n = 15, wt = avg_log2FC)
+c23_top$gene = rownames(c23_top)
+
+DoHeatmap(sn_integrated, features = c23_top$gene, label=FALSE)
+
+
+###################
+# ADD ANNOTATIONS #
+###################
+
+Idents(sn_integrated) = sn_integrated@meta.data$seurat_clusters
+
+sn_integrated <- RenameIdents(sn_integrated, '0' = 'CV 1','2' = 'CV 2')
+sn_integrated <- RenameIdents(sn_integrated, '1' = 'PP 1','6' = 'PP 2','10' = 'PP 3','11' = 'PP 4')
+sn_integrated <- RenameIdents(sn_integrated, '4' = 'IZ 1','5' = 'IZ 2','7' = 'IZ 3','9' = 'IZ 4','13' = 'IZ 5',
+                              '17' = 'IZ 6')
+
+sn_integrated <- RenameIdents(sn_integrated, '3' = 'LSEC Zone 2&3 1','8' = 'LSEC Zone 2&3 2','15' = 'LSEC Zone 2&3 3')
+sn_integrated <- RenameIdents(sn_integrated, '12' = 'Portal Endothelial','23' = 'LSEC Zone 1')
+
+sn_integrated <- RenameIdents(sn_integrated, '14' = 'Kupffer Cells','16' = 'HSC/Fibroblasts','21' = 'Cholangiocytes')
+sn_integrated <- RenameIdents(sn_integrated, '20' = 'T/NK Cells','22' = 'B/Plasma Cells')
+
+sn_integrated <- RenameIdents(sn_integrated, '18' = 'Endothelial Progenitor','19' = 'Hepatocyte Progenitor')
+
+
+sn_integrated$celltype <- Idents(sn_integrated)
+
+# [Fig 3a]
+DimPlot(sn_integrated, size=3, group.by='celltype') + 
+  theme(legend.position="right") + 
+  ggtitle("Normal and BA integrated") +
+  scale_color_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"
+                              )) +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(override.aes = list(size=7),nrow=4))
+
+# [Fig 3b]
+DotPlot(sn_integrated, features = genes, cols = c('yellow','blue'), assay='SCT') + 
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5, hjust=0.5), 
+        axis.title=element_blank(),
+        axis.text=element_text(size=14),
+        legend.position='bottom',
+        aspect.ratio=0.5) +
+  scale_y_discrete(limits = rev(levels(Idents(sn_integrated))))
+                              
+##########################
+# SAVE ANNOTATED OBJECTS #
+##########################
+
+# Normal
+sn_integrated_normal = sn_integrated[,sn_integrated$original=='Normal']
+DimPlot(sn_integrated_normal, size=3, group.by='celltype') + #, label=T, repel=T, label.size=3)  + 
+  theme(legend.position="right") + 
+  ggtitle("Normal (integrated)") +
+  scale_color_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"
+                              ))
+
+as.h5Seurat(x = sn_integrated_normal, filename = "sn_normal_labelled" ,overwrite = TRUE)
+
+# BA
+sn_integrated_ba = sn_integrated[,sn_integrated$original=='Cirrhotic BA']
+DimPlot(sn_integrated_ba, size=3, group.by='celltype') + #, label=T, repel=T, label.size=3)  + 
+  theme(legend.position="right") + 
+  ggtitle("BA (integrated)") +
+  scale_color_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"#,"#014421","#C04000",
+                              ))
+
+as.h5Seurat(x = sn_integrated_ba, filename = "sn_ba_labelled" ,overwrite = TRUE)
+
+
+#######################
+## SAMPLE COMPARISON ##
+#######################
+
+# What proportion of cells are in each cluster?
+sn_integrated <- SetIdent(sn_integrated, value = sn_integrated@meta.data$celltype)
+Idents(sn_integrated)
+
+prop.table(table(Idents(sn_integrated)))
+
+prop.table(table(Idents(sn_integrated), sn_integrated$original), margin = 2)
+
+pt <- table(Idents(sn_integrated), sn_integrated$original)
+pt <- as.data.frame(pt)
+pt$Var1 <- as.character(pt$Var1)
+
+ggplot(pt, aes(x = Var2, y = Freq, fill = Var1)) +
+  theme_bw(base_size = 15) +
+  geom_col(position = "fill", width = 0.5) +
+  xlab("Sample") +
+  ylab("Proportion") +
+  theme(legend.title = element_blank())
+
+proportions = as.data.frame(prop.table(table(Idents(sn_integrated), sn_integrated$original), margin = 2))
+proportions$Var2 = factor(proportions$Var2, levels=c('Normal','BA'))
+
+# [Fig 4a]
+ggplot(data = proportions[proportions$Var2=='Normal',],
+                       aes(x = Var1, y = Freq,
+                           fill=Var1)) +
+  geom_col(position = position_dodge(width = 0.8), width=0.8) +
+  theme_bw() +
+  ggtitle("Normal") + xlab("") + ylab("Proportion (%)") +
+  theme(axis.text=element_text(size=20),
+        axis.title=element_text(size=30),
+        plot.title=element_text(size = 34, hjust = 0.5),
+        panel.grid=element_blank(),
+        legend.position='none',
+        aspect.ratio=0.2,
+        strip.text=element_text(size = 34, hjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),limits = c(0,0.1)) +
+  scale_fill_manual(values = c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"
+                              ))
+# [Fig 5a]
+ggplot(data = proportions[proportions$Var2=='BA',],
+                       aes(x = Var1, y = Freq,
+                           fill=Var1)) +
+  geom_col(position = position_dodge(width = 0.8), width=0.8) +
+  theme_bw() +
+  ggtitle("BA") + xlab("") + ylab("Proportion (%)") +
+  theme(axis.text=element_text(size=20),
+        axis.title=element_text(size=30),
+        plot.title=element_text(size = 34, hjust = 0.5),
+        panel.grid=element_blank(),
+        legend.position='none',
+        aspect.ratio=0.2,
+        strip.text=element_text(size = 34, hjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),limits = c(0,0.1)) +
+  scale_fill_manual(values = c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              "#FF7518","orange", 
+                              "#808080","#dcdcdc","#c4c3d0","#b2beb5","darkgray","gray",
+                              "#faf0e6","#f5deb3","#918151","#c3b091",
+                              "#333333","black"
+                              ))
+
+
+# Is there a statistical difference in cell type proportion?
+# single cell proportion test using permutation
+# Source: https://github.com/rpolicastro/scProportionTest
+
+prop_test <- sc_utils(sn_integrated)
+prop_test <- permutation_test(
+	prop_test, cluster_identity = "celltype",
+	sample_1 = "Normal", sample_2 = "BA",
+	sample_identity = "original"
+)
+
+# [Fig 3d]
+permutation_plot(prop_test) +
+  theme_bw() +
+  ylab("Log2(Fold Change)") + xlab(NULL) +
+  theme(panel.grid=element_blank(),
+        axis.text=element_text(size=18),
+        axis.title=element_text(size=25),
+        plot.title=element_text(size = 34, hjust = 0.5),
+        legend.position='none',
+        aspect.ratio=1.5,
+        strip.text=element_text(size = 34, hjust = 0.5),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=0.5)) +
+  scale_color_manual(values=c('red','darkgray'))
+
+  
+######################
+## ADD METACLUSTERS ##
+######################
+
+Idents(sn_integrated) = sn_integrated@meta.data$seurat_clusters
+
+sn_integrated <- RenameIdents(sn_integrated, '0' = 'CV','2' = 'CV')
+sn_integrated <- RenameIdents(sn_integrated, '1' = 'PP','6' = 'PP','10' = 'PP','11' = 'PP')
+sn_integrated <- RenameIdents(sn_integrated, '4' = 'IZ','5' = 'IZ','7' = 'IZ','9' = 'IZ','13' = 'IZ','17' = 'IZ')
+
+sn_integrated <- RenameIdents(sn_integrated, '3' = 'LSEC Zone 2&3','8' = 'LSEC Zone 2&3','15' = 'LSEC Zone 2&3')
+sn_integrated <- RenameIdents(sn_integrated, '12' = 'Portal Endothelial','23' = 'LSEC Zone 1')
+
+sn_integrated <- RenameIdents(sn_integrated, '14' = 'Kupffer Cells','16' = 'HSC/Fibroblasts','21' = 'Cholangiocytes')
+sn_integrated <- RenameIdents(sn_integrated, '20' = 'T/NK Cells','22' = 'B/Plasma Cells')
+
+sn_integrated <- RenameIdents(sn_integrated, '18' = 'Endothelial Progenitor','19' = 'Hepatocyte Progenitor')
+
+
+sn_integrated$metaclusters <- Idents(sn_integrated)
+
+DimPlot(sn_integrated, size=3, group.by='metaclusters') + #, label=T, repel=T, label.size=3)  + 
+  theme(legend.position="right") + 
+  ggtitle("Normal and BA integrated") +
+  scale_color_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              #"#FF7518",
+                              "orange","#808080",
+                              "#333333","black"
+                              ))
+
+DimPlot(sn_integrated[,sn_integrated$original=='Normal'], size=3, group.by='metaclusters') + 
+  theme(legend.position="right") + 
+  ggtitle("Normal (integrated)") +
+  scale_color_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              #"#FF7518",
+                              "orange","#808080",
+                              "#333333","black"
+                              ))
+
+DimPlot(sn_integrated[,sn_integrated$original=='BA'], size=3, group.by='metaclusters') + 
+  theme(legend.position="right") + 
+  ggtitle("BA (integrated)") +
+  scale_color_manual(values=c("#FFEA00",'red',"#bf812d","#ccff00","#8b008b","#ff00ff",
+                              "#ff6961","#800000", 
+                              "#313695", "#0096FF",
+                              #"#FF7518",
+                              "orange","#808080",
+                              "#333333","black"
+                              ))
+```
+

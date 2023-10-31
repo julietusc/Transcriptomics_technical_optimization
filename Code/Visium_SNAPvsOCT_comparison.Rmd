@@ -1,0 +1,664 @@
+---
+title: "Visium normal-BA OCT vs SNAP"
+author: "Sarah Bangerth"
+date: "2023-10-31"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd('/users/sarahbangerth/Desktop/Github/Transcriptomics_technical_optimization')
+
+# Libraries
+library(tidyverse)
+library(dplyr)
+library(Seurat)
+library(DropletUtils)
+library(ggplot2)
+library(pathfindR)
+```
+
+# Data pre-processing
+
+```{r}
+# Create image object
+## BA snap
+spatial_BAsnap = Read10X_Image(image.dir = "Data/Spatial/BA_snap/spatial",
+                           filter.matrix = TRUE)
+
+spatial_BAsnap = Load10X_Spatial(data.dir = "Data/Spatial/BA_snap",
+  filename = "filtered_feature_bc_matrix.h5",
+  assay = "spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL)
+
+
+## BA OCT
+spatial_BAoct = Read10X_Image(image.dir = "Data/Spatial/BA_oct/spatial",
+                           filter.matrix = TRUE)
+
+spatial_BAoct = Load10X_Spatial(data.dir = "Data/Spatial/BA_oct",
+  filename = "filtered_feature_bc_matrix.h5",
+  assay = "spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL)
+
+## Normal SNAP
+spatial_Nsnap = Read10X_Image(image.dir = "Data/Spatial/Normal_snap/spatial",
+                           filter.matrix = TRUE)
+
+
+spatial_Nsnap = Load10X_Spatial(data.dir = "Data/Spatial/Normal_snap",
+  filename = "filtered_feature_bc_matrix.h5",
+  assay = "spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL)
+
+## Normal oct
+spatial_Noct = Read10X_Image(image.dir = "Data/Spatial/Normal_oct/spatial",
+                           filter.matrix = TRUE)
+
+spatial_Noct = Load10X_Spatial(data.dir = "Data/Spatial/Normal_oct",
+  filename = "filtered_feature_bc_matrix.h5",
+  assay = "spatial",
+  slice = "slice1",
+  filter.matrix = TRUE,
+  to.upper = FALSE,
+  image = NULL)
+```
+
+# Quality Control - Spatial Spots
+
+Calculate percentage mitochondria for each sample.
+
+```{r}
+spatial_BAsnap[["percent.mt"]] = PercentageFeatureSet(spatial_BAsnap, pattern = "^MT-")
+spatial_BAoct[["percent.mt"]] = PercentageFeatureSet(spatial_BAoct, pattern = "^MT-")
+spatial_Nsnap[["percent.mt"]] = PercentageFeatureSet(spatial_Nsnap, pattern = "^MT-")
+spatial_Noct[["percent.mt"]] = PercentageFeatureSet(spatial_Noct, pattern = "^MT-")
+
+## BAsnap
+VlnPlot(spatial_BAsnap, features = "percent.mt", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Percent Mitochondria \nper Spatial Spot\nBA Liver (SNAP)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+## BAoct
+VlnPlot(spatial_BAoct, features = "percent.mt", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Percent Mitochondria \nper Spatial Spot\nBA Liver (OCT)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+## Nsnap
+VlnPlot(spatial_Nsnap, features = "percent.mt", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Percent Mitochondria \nper Spatial Spot\nNormal Liver (SNAP)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+## Noct
+VlnPlot(spatial_Noct, features = "percent.mt", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Percent Mitochondria \nper Spatial Spot\nNormal Liver (OCT)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+```
+
+Filter out genes were ratio of mitochondria is above 10%. Only keep spots with at least 200 genes.
+
+```{r}
+spatial_BAsnap = subset(spatial_BAsnap, percent.mt < 10 & nFeature_spatial > 200)
+spatial_BAoct = subset(spatial_BAoct, percent.mt < 10 & nFeature_spatial > 200)
+spatial_Nsnap = subset(spatial_Nsnap, percent.mt < 10 & nFeature_spatial > 200)
+spatial_Noct = subset(spatial_Noct, percent.mt < 10 & nFeature_spatial > 200)
+```
+
+# Quality Control - Genes
+
+Exclude mitochondria, HSP and ribosomal genes from features.
+
+```{r}
+## BAsnap
+MT.indexBAsnap = grep(pattern = "^MT-", x = rownames(spatial_BAsnap), value = FALSE) # Select row indices and not MT names
+HSP.indexBAsnap = grep(pattern = "^HSP", x = rownames(spatial_BAsnap), value = FALSE) 
+MRP.indexBAsnap = grep(pattern = "^MRP", x = rownames(spatial_BAsnap), value = FALSE) 
+RPL.indexBAsnap = grep(pattern = "^RPL", x = rownames(spatial_BAsnap), value = FALSE) 
+RPS.indexBAsnap = grep(pattern = "^RPS", x = rownames(spatial_BAsnap), value = FALSE) 
+
+spatial_BAsnap = spatial_BAsnap[-c(MT.indexBAsnap,HSP.indexBAsnap,MRP.indexBAsnap,RPL.indexBAsnap,RPS.indexBAsnap), ]
+
+## BAoct
+MT.indexBAoct = grep(pattern = "^MT-", x = rownames(spatial_BAoct), value = FALSE) # Select row indices and not MT names
+HSP.indexBAoct = grep(pattern = "^HSP", x = rownames(spatial_BAoct), value = FALSE) 
+MRP.indexBAoct = grep(pattern = "^MRP", x = rownames(spatial_BAoct), value = FALSE) 
+RPL.indexBAoct = grep(pattern = "^RPL", x = rownames(spatial_BAoct), value = FALSE) 
+RPS.indexBAoct = grep(pattern = "^RPS", x = rownames(spatial_BAoct), value = FALSE) 
+
+spatial_BAoct = spatial_BAoct[-c(MT.indexBAoct,HSP.indexBAoct,MRP.indexBAoct,RPL.indexBAoct,RPS.indexBAoct), ]
+
+## Nsnap
+MT.indexNsnap = grep(pattern = "^MT-", x = rownames(spatial_Nsnap), value = FALSE) # Select row indices and not MT names
+HSP.indexNsnap = grep(pattern = "^HSP", x = rownames(spatial_Nsnap), value = FALSE) 
+MRP.indexNsnap = grep(pattern = "^MRP", x = rownames(spatial_Nsnap), value = FALSE) 
+RPL.indexNsnap = grep(pattern = "^RPL", x = rownames(spatial_Nsnap), value = FALSE) 
+RPS.indexNsnap = grep(pattern = "^RPS", x = rownames(spatial_Nsnap), value = FALSE) 
+
+spatial_Nsnap = spatial_Nsnap[-c(MT.indexNsnap,HSP.indexNsnap,MRP.indexNsnap,RPL.indexNsnap,RPS.indexNsnap), ]
+
+## Noct
+MT.indexNoct = grep(pattern = "^MT-", x = rownames(spatial_Noct), value = FALSE) # Select row indices and not MT names
+HSP.indexNoct = grep(pattern = "^HSP", x = rownames(spatial_Noct), value = FALSE) 
+MRP.indexNoct = grep(pattern = "^MRP", x = rownames(spatial_Noct), value = FALSE) 
+RPL.indexNoct = grep(pattern = "^RPL", x = rownames(spatial_Noct), value = FALSE) 
+RPS.indexNoct = grep(pattern = "^RPS", x = rownames(spatial_Noct), value = FALSE) 
+
+spatial_Noct = spatial_Noct[-c(MT.indexNoct,HSP.indexNoct,MRP.indexNoct,RPL.indexNoct,RPS.indexNoct), ]
+```
+
+Extract gene names that are present in at least one spatial count. Exclude genes not present in any spatial spot.
+
+```{r}
+### BAsnap
+count_matrix_BAsnap = as.data.frame(spatial_BAsnap[['spatial']]@counts)
+rowSums(count_matrix_BAsnap)
+median(rowSums(count_matrix_BAsnap))
+genesBAsnap = count_matrix_BAsnap %>% filter(rowSums(count_matrix_BAsnap)>=1) %>% rownames()
+
+spatial_BAsnap = spatial_BAsnap[c(genesBAsnap), ]
+
+### BAoct
+count_matrix_BAoct = as.data.frame(spatial_BAoct[['spatial']]@counts)
+rowSums(count_matrix_BAoct)
+median(rowSums(count_matrix_BAoct))
+genesBAoct = count_matrix_BAoct %>% filter(rowSums(count_matrix_BAoct)>=1) %>% rownames()
+
+spatial_BAoct = spatial_BAoct[c(genesBAoct), ]
+
+### Nsnap
+count_matrix_Nsnap = as.data.frame(spatial_Nsnap[['spatial']]@counts)
+rowSums(count_matrix_Nsnap)
+median(rowSums(count_matrix_Nsnap)) 
+genesNsnap = count_matrix_Nsnap %>% filter(rowSums(count_matrix_Nsnap)>=1) %>% rownames()
+
+spatial_Nsnap = spatial_Nsnap[c(genesNsnap), ]
+
+### Noct
+count_matrix_Noct = as.data.frame(spatial_Noct[['spatial']]@counts)
+rowSums(count_matrix_Noct)
+median(rowSums(count_matrix_Noct)) 
+genesNoct = count_matrix_Noct %>% filter(rowSums(count_matrix_Noct)>=1) %>% rownames()
+
+spatial_Noct = spatial_Noct[c(genesNoct), ]
+```
+
+## Visualize all samples and look at spatial heterogeneity
+
+```{r}
+cscale <- c("lightgray", "mistyrose", "red", "darkred", "black")
+## BAsnap
+plot1 = VlnPlot(spatial_BAsnap, features = "nCount_spatial", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Molecular Counts per Spatial Spot\nBA Liver (SNAP)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+plot2 = SpatialPlot(spatial_BAsnap, features = "nCount_spatial") + 
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+plot1 | plot2
+
+## BAoct
+plot1 = VlnPlot(spatial_BAoct, features = "nCount_spatial", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Molecular Counts per Spatial Spot\nBA Liver (OCT)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+plot2 = SpatialFeaturePlot(spatial_BAoct, features = "nCount_spatial") + 
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+plot1 | plot2
+
+## Nsnap
+plot1 = VlnPlot(spatial_Nsnap, features = "nCount_spatial", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Molecular Counts per Spatial Spot\nNormal Liver (SNAP)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+plot2 = SpatialFeaturePlot(spatial_Nsnap, features = "nCount_spatial") + 
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+plot1 | plot2
+
+## Noct
+plot1 = VlnPlot(spatial_Noct, features = "nCount_spatial", pt.size = 0.1) + NoLegend() + 
+  ggtitle("Molecular Counts per Spatial Spot\nNormal Liver (OCT)") + xlab("") + 
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+plot2 = SpatialFeaturePlot(spatial_Noct, features = "nCount_spatial") + 
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+plot1 | plot2
+```
+
+# SCTransform
+
+```{r}
+spatial_BAsnap = SCTransform(spatial_BAsnap, assay = "spatial", verbose = FALSE)#, vars.to.regress='percent.mt')
+spatial_BAoct = SCTransform(spatial_BAoct, assay = "spatial", verbose = FALSE)
+spatial_Nsnap = SCTransform(spatial_Nsnap, assay = "spatial", verbose = FALSE)
+spatial_Noct = SCTransform(spatial_Noct, assay = "spatial", verbose = FALSE)
+
+# Visualize after SCTransform
+SpatialFeaturePlot(spatial_BAsnap, features = "nCount_SCT") + 
+  ggtitle("SCTransform: Molecular Counts per Spatial Spot\nBA Liver (SNAP)") +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+SpatialFeaturePlot(spatial_BAoct, features = "nCount_SCT") + 
+  ggtitle("SCTransform: Molecular Counts per Spatial Spot\nBA Liver (OCT)") +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+SpatialFeaturePlot(spatial_Nsnap, features = "nCount_SCT") + 
+  ggtitle("SCTransform: Molecular Counts per Spatial Spot\nNormal Liver (SNAP)") +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+SpatialFeaturePlot(spatial_Noct, features = "nCount_SCT") + 
+  ggtitle("SCTransform: Molecular Counts per Spatial Spot\nNormal Liver (OCT)") +
+  theme(legend.position = "right", legend.title = element_blank()) +
+  scale_fill_gradientn(colours=cscale)
+```
+
+# Identification of highly variable features
+
+```{r}
+### BAsnap
+spatial_BAsnap = FindVariableFeatures(spatial_BAsnap, selection.method = "vst", nfeatures = 3000)
+top10 = head(VariableFeatures(spatial_BAsnap), 10)
+plot1 = VariableFeaturePlot(spatial_BAsnap)
+plot2 = LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2 + ggtitle("BA Liver (SNAP)")
+
+### BAoct
+spatial_BAoct = FindVariableFeatures(spatial_BAoct, selection.method = "vst", nfeatures = 3000)
+top10 = head(VariableFeatures(spatial_BAoct), 10)
+plot1 = VariableFeaturePlot(spatial_BAoct)
+plot2 = LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2 + ggtitle("BA Liver (OCT)")
+
+### Nsnap
+spatial_Nsnap = FindVariableFeatures(spatial_Nsnap, selection.method = "vst", nfeatures = 3000)
+top10 = head(VariableFeatures(spatial_Nsnap), 10)
+plot1 = VariableFeaturePlot(spatial_Nsnap)
+plot2 = LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2 + ggtitle("Normal Liver (SNAP)")
+
+### Noct
+spatial_Noct = FindVariableFeatures(spatial_Noct, selection.method = "vst", nfeatures = 3000)
+top10 = head(VariableFeatures(spatial_Noct), 10)
+plot1 = VariableFeaturePlot(spatial_Noct)
+plot2 = LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot2 + ggtitle("Normal Liver (OCT)")
+```
+
+# Data integration
+
+```{r}
+# Rename seurat objects for sample names
+head(x = spatial_BAsnap[[]])
+spatial_BAsnap$original = "BA SNAP"
+spatial_BAsnap$orig.ident = NULL
+head(x = spatial_BAsnap[[]])
+
+head(x = spatial_BAoct[[]])
+spatial_BAoct$original = "BA OCT"
+spatial_BAoct$orig.ident = NULL
+head(x = spatial_BAoct[[]])
+
+head(x = spatial_Nsnap[[]])
+spatial_Nsnap$original = "Normal SNAP"
+spatial_Nsnap$orig.ident = NULL
+head(x = spatial_Nsnap[[]])
+
+head(x = spatial_Noct[[]])
+spatial_Noct$original = "Normal OCT"
+spatial_Noct$orig.ident = NULL
+head(x = spatial_Noct[[]])
+```
+
+```{r}
+# select features that are repeatedly variable across datasets for integration
+features_all = SelectIntegrationFeatures(object.list = c(spatial_BAsnap,spatial_BAoct,spatial_Nsnap,spatial_Noct),
+                                       nfeatures=3000)
+
+spatial_BAsnap = PrepSCTIntegration(object.list = c(spatial_BAsnap), anchor.features = features_all)
+spatial_BAoct = PrepSCTIntegration(object.list = c(spatial_BAoct), anchor.features = features_all)
+spatial_Nsnap = PrepSCTIntegration(object.list = c(spatial_Nsnap), anchor.features = features_all)
+spatial_Noct = PrepSCTIntegration(object.list = c(spatial_Noct), anchor.features = features_all)
+
+# Perform integration
+# We then identify anchors using the FindIntegrationAnchors() function, which takes a list of Seurat objects as input, and use these anchors to integrate the two datasets together with IntegrateData().
+anchors_all = FindIntegrationAnchors(object.list = c(spatial_BAsnap,spatial_BAoct,spatial_Nsnap,spatial_Noct), 
+                                   normalization.method = 'SCT',
+                                 anchor.features = features_all)
+samples_integrated = IntegrateData(anchorset = anchors_all, normalization.method = "SCT")
+head(samples_integrated[[]])
+
+# Perform an integrated analysis
+DefaultAssay(samples_integrated) = "integrated"
+
+# Run the standard workflow for visualization and clustering
+samples_integrated = RunPCA(samples_integrated, verbose = FALSE, seed.use = 42)
+ElbowPlot(samples_integrated)
+
+# Dimensionality reduction and Clustering
+samples_integrated = FindNeighbors(samples_integrated, dims = 1:10, k.param=40)
+samples_integrated = FindClusters(samples_integrated, verbose = FALSE, random.seed = 42, 
+                                n.start = 20, resolution = 5)
+samples_integrated = RunUMAP(samples_integrated, reduction = "pca", dims = 1:10, seed.use=42)
+
+samples_integrated$original = factor(samples_integrated$original, 
+                                         levels = c("Normal SNAP", "Normal OCT",
+                                                    "BA SNAP", "BA OCT"))
+levels(samples_integrated$original)
+
+# Visualization [Fig 2c]
+p1 = DimPlot(samples_integrated, reduction = "umap", group.by = 'original', pt.size = 0.5,
+             cols=c('#de77ae','#FFC000','#0096FF','#967969'))
+p2 = DimPlot(samples_integrated, reduction = "umap", group.by = 'ident', label = TRUE, 
+             repel = TRUE, pt.size=0.5)
+p1 + p2
+
+DimPlot(samples_integrated, reduction = "umap", split.by = "original", label = TRUE, 
+        repel = TRUE, cols=topo.colors(36))
+
+# [Fig 1b]
+SpatialDimPlot(samples_integrated, images='slice1') +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(override.aes = list(size=4),nrow=2))
+
+SpatialDimPlot(samples_integrated, images='slice1.1') +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(override.aes = list(size=4),nrow=2))
+
+SpatialDimPlot(samples_integrated, images='slice1.2') +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(override.aes = list(size=4),nrow=2))
+
+SpatialDimPlot(samples_integrated, images='slice1.3') +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(override.aes = list(size=4),nrow=2))
+
+
+# Differential Expression - CLUSTERS
+samples_integrated.cluster.markers.positive = FindAllMarkers(samples_integrated,
+                                    only.pos = TRUE, min.pct = 0.25,
+                                    logfc.threshold = 0.25, test.use='negbinom',
+                                    assay='spatial')
+head(samples_integrated.cluster.markers.positive)
+
+markers_integrated_clusters_positive = samples_integrated.cluster.markers.positive %>%
+  filter(p_val_adj < 0.05) %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_log2FC)
+
+markers_integrated_clusters_positive %>%
+    top_n(n = 4, wt = avg_log2FC) -> top4
+
+# [Fig 2d]
+DoHeatmap(samples_integrated, features = top4$gene, label=FALSE) +
+  ggtitle("Top Markers By Cluster")
+
+samples_integrated.cluster.markers.all = FindAllMarkers(samples_integrated,
+                                    only.pos = FALSE, min.pct = 0.25,
+                                    logfc.threshold = 0.25, test.use='negbinom',
+                                    assay='spatial')
+head(samples_integrated.cluster.markers.all)
+
+################################################################################
+
+# Differential Expression - Samples
+
+Idents(samples_integrated) = samples_integrated@meta.data$original
+
+# Normal SNAP vs Normal OCT
+Normal_snap_oct_all = FindMarkers(samples_integrated, 
+                                                ident.1 = "Normal SNAP",
+                                                ident.2 = "Normal OCT",
+                                    only.pos = FALSE, min.pct = 0.25,
+                                    logfc.threshold = 0.25, test.use='negbinom',
+                                    assay='spatial')
+
+Normal_snap_oct_all$gene = rownames(Normal_snap_oct_all)
+Normal_snap_oct_all$sample = "Normal SNAP (vs Normal OCT)"
+head(Normal_snap_oct_all)
+
+### Enrichment/Pathway Analysis
+Normal_snap_oct_all.path_input = Normal_snap_oct_all %>%
+  subset(select=c(gene, avg_log2FC, p_val_adj))
+head(Normal_snap_oct_all.path_input)
+
+input_testing(Normal_snap_oct_all.path_input)
+Normal_snap_oct_all.path_output = run_pathfindR(Normal_snap_oct_all.path_input)
+head(Normal_snap_oct_all.path_output)
+
+# BA SNAP vs BA OCT
+BA_snap_oct_all = FindMarkers(samples_integrated, 
+                                                ident.1 = "BA SNAP",
+                                                ident.2 = "BA OCT",
+                                    only.pos = FALSE, min.pct = 0.25,
+                                    logfc.threshold = 0.25, test.use='negbinom',
+                                    assay='spatial')
+
+BA_snap_oct_all$gene = rownames(BA_snap_oct_all)
+BA_snap_oct_all$sample = "BA SNAP (vs BA OCT)"
+head(BA_snap_oct_all)
+
+### Enrichment/Pathway Analysis
+BA_snap_oct_all.path_input = BA_snap_oct_all %>%
+  subset(select=c(gene, avg_log2FC, p_val_adj))
+head(BA_snap_oct_all.path_input)
+
+input_testing(BA_snap_oct_all.path_input)
+BA_snap_oct_all.path_output = run_pathfindR(BA_snap_oct_all.path_input)
+head(BA_snap_oct_all.path_output)
+```
+
+Volcano Plots
+
+```{r}
+################################################
+# Normal SNAP vs OCT
+head(Normal_snap_oct_all)
+
+volcanoplot_normal = Normal_snap_oct_all
+
+volcanoplot_normal$diffexpressed = "NO"
+# if log2Foldchange > 1 and pvalue < 0.05, set as "UP" 
+volcanoplot_normal$diffexpressed[volcanoplot_normal$avg_log2FC > 1 & volcanoplot_normal$p_val_adj < 0.05] = "UP"
+# if log2Foldchange < -1 and pvalue < 0.05, set as "DOWN"
+volcanoplot_normal$diffexpressed[volcanoplot_normal$avg_log2FC < -1 & volcanoplot_normal$p_val_adj < 0.05] = "DOWN"
+
+head(volcanoplot_normal)
+
+volcanoplot_normal$delabel = NA
+volcanoplot_normal$delabel[volcanoplot_normal$diffexpressed != "NO"] = volcanoplot_normal$gene[volcanoplot_normal$diffexpressed != "NO"]
+
+head(volcanoplot_normal)
+
+up_regulated_normal = volcanoplot_normal %>% filter(diffexpressed=='UP')
+down_regulated_normal = volcanoplot_normal %>% filter(diffexpressed=='DOWN')
+
+down_regulated_normal$gene
+
+volcano = ggplot(data = volcanoplot_normal, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                     col = diffexpressed, label=delabel))
+
+volcano + 
+  geom_point(size=2) +
+  scale_color_manual(values=c("gray", "brown")) + 
+  theme_minimal() + ylab("-log10(p-value)") + xlab("Log2 Fold-Change") + xlim(-2,2) +
+  geom_vline(xintercept=c(-1, 1), col="black") +
+  geom_hline(yintercept=-log10(0.05), col="black") + 
+  scale_y_continuous(limits=c(0,300)) +
+  theme(text = element_text(size = 25),
+        axis.title = element_text(size=35),
+        axis.text = element_text(size=25),
+        legend.text = element_text(size=30),
+        legend.title = element_text(size=30))  +
+  ggtitle('Normal SNAP vs OCT')
+
+################################################
+# BA SNAP vs OCT
+head(BA_snap_oct_all)
+
+volcanoplot_ba = BA_snap_oct_all
+
+volcanoplot_ba$diffexpressed = "NO"
+# if log2Foldchange > 1 and pvalue < 0.05, set as "UP" 
+volcanoplot_ba$diffexpressed[volcanoplot_ba$avg_log2FC > 1 & volcanoplot_ba$p_val_adj < 0.05] = "UP"
+# if log2Foldchange < -1 and pvalue < 0.05, set as "DOWN"
+volcanoplot_ba$diffexpressed[volcanoplot_ba$avg_log2FC < -1 & volcanoplot_ba$p_val_adj < 0.05] = "DOWN"
+
+head(volcanoplot_ba)
+
+volcanoplot_ba$delabel = NA
+volcanoplot_ba$delabel[volcanoplot_ba$diffexpressed != "NO"] = volcanoplot_ba$gene[volcanoplot_ba$diffexpressed != "NO"]
+
+head(volcanoplot_ba)
+
+up_regulated_ba = volcanoplot_ba %>% filter(diffexpressed=='UP')
+down_regulated_ba = volcanoplot_ba %>% filter(diffexpressed=='DOWN')
+
+down_regulated_ba$gene
+
+volcano = ggplot(data = volcanoplot_ba, aes(x = avg_log2FC, y = -log10(p_val_adj), 
+                                     col = diffexpressed, label=delabel))
+
+volcano + 
+  geom_point(size=2) + 
+  scale_color_manual(values=c("blue", "gray", "brown")) + 
+  theme_minimal() + ylab("-log10(p-value)") + xlab("Log2 Fold-Change") + xlim(-2,2) +
+  geom_vline(xintercept=c(-1, 1), col="black") +
+  geom_hline(yintercept=-log10(0.05), col="black") + 
+  scale_y_continuous(limits=c(0,300)) +
+  theme(text = element_text(size = 25),
+        axis.title = element_text(size=35),
+        axis.text = element_text(size=25),
+        legend.text = element_text(size=30),
+        legend.title = element_text(size=30))  +
+  ggtitle('Cirrhotic BA SNAP vs OCT')
+```
+
+# Pathway analysis - Manual figure (snap vs oct) [Fig 1d]
+
+```{r}
+pathway_df_normal = as.data.frame(c("Proteasome","Oxidative phosphorylation","Diabetic cardiomyopathy","Reactive oxygen species","MAFLD","Thermogenesis","Parkinson disease","Prion disease","RES","Spinocerebellar ataxia"))
+colnames(pathway_df_normal) = 'Pathway'
+pathway_df_normal$FE = c(5.067016164,3.931305645,3.170272146,3.348289201,3.862766434,
+                         2.701608144,3.493789371,3.149633588,2.147408392,2.665651489)
+pathway_df_normal$NumGenes = c(40,80,104,121,103,100,152,142,55,65)
+pathway_df_normal$pval = c(6.60E-80,2.85E-74,4.39E-72,1.31E-67,2.38E-65,7.29E-64,9.75E-64,1.91E-59,1.78E-47,2.84E-46)
+pathway_df_normal$Group = c('Normal','Normal','Normal','Normal','Normal','Normal','Normal','Normal','Normal','Normal')
+pathway_df_normal
+
+pathway_df_ba = as.data.frame(c("Oxidative phosphorylation","MAFLD","Thermogenesis","Diabetic cardiomyopathy","Reactive oxygen species","Parkinson disease","Prion disease","Peroxisome","RES","Proteasome"))
+colnames(pathway_df_ba) = 'Pathway'
+pathway_df_ba$FE = c(8.234158215,6.732817337,5.011853917,5.928719723,6.209880069,
+                     5.777191651,5.375774777,5.200143472,3.621579371,4.169359477)
+pathway_df_ba$NumGenes = c(56,60,62,65,75,84,81,25,31,11)
+pathway_df_ba$pval = c(2.06E-64,4.77E-59,6.76E-59,3.68E-57,2.64E-55,9.83E-54,2.96E-49,1.27E-35,1.60E-34,1.33E-22)
+pathway_df_ba$Group = c('BA','BA','BA','BA','BA',
+                        'BA','BA','BA','BA','BA')
+pathway_df_ba
+
+pathway_df = rbind(pathway_df_normal,pathway_df_ba)
+pathway_df$Group = factor(pathway_df$Group, levels=c('Normal','BA'))
+
+cscale <- c("lightgray", "mistyrose", "red", "darkred")
+
+ggplot(pathway_df, aes(FE, Pathway, fill = -log10(pval), size = NumGenes)) +
+  geom_point(shape=21,stroke=0) +
+  facet_wrap( ~ Group) +
+  scale_y_discrete(limits = rev(c("Oxidative phosphorylation","MAFLD","Thermogenesis","Diabetic cardiomyopathy","Reactive oxygen species","Parkinson disease","Prion disease","Peroxisome","RES","Proteasome","Spinocerebellar ataxia"))) +
+  scale_fill_gradientn(colours=cscale, breaks = c(40,60,90), labels=c(40,60,70)) +
+  theme_minimal() + xlab('Fold Enrichment') + ylab(NULL) + ggtitle("SNAP vs OCT") +
+  scale_x_continuous(breaks=c(2,4,6,8),labels=c(2,4,6,8),limits=c(1,9))+
+  theme(legend.position = "right", 
+        panel.grid.major = element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 20),
+        strip.text=element_text(size = 30, hjust = 0.5),
+        plot.title=element_text(size = 30, hjust = 0.5),
+        axis.text = element_text(size=20),
+        axis.title = element_text(size=25)) +
+  guides(size = guide_legend(override.aes = list(fill = NA, color = "black", stroke = .25), 
+                             label.position = "right",
+                             title.position = "top", 
+                             order = 1,
+                             title = '# genes'),
+         fill = guide_colorbar(ticks.colour = NA, title.position = "top", order = 2),
+         shape = guide_legend(override.aes = list(fill = NA, color = "black", stroke = 5), 
+                             label.position = "right",
+                             title.position = "top", 
+                             order = 1,
+                             title = ''))
+```
+
+# DE genes barplots [Fig 1c]
+
+```{r}
+# Normal #
+
+de_normal = as.data.frame(c("C1QA", "MFSD2A", "JUN", "ATF3", "ADH1B", "IGFBP1", "FGL1", "BAAT", "KLF6", "AKR1C1", "SDS", "UBB", "DNAJB1", 
+"PCK1", "H19", "PLIN2", "FST", "GDF15", "CYP2E1", "RHOU", "BAG3"))
+
+colnames(de_normal) = 'Variable'
+de_normal$log2FC = c(1.1479683323838500,1.1926168616805400,1.3124117390794300,1.5905294466995600,1.0920748041024400,1.256725688851940,
+                 1.0626029472321700,1.098799520883960,1.1590923301018200,1.0502939650252900,1.1244946725817100,1.0621009613313400,
+                 1.7702313055021400,1.4026584218824000,1.272347239286300,1.0217296029012100,1.1063565879709900,1.2970615693810700,
+                 1.1038695973605800,1.020246949300340,1.063372418438750)
+de_normal
+de_normal$Color = 'brown'
+
+ggplot(data = de_normal, aes(x = log2FC, y = Variable, fill=Color)) +
+  geom_col(position = position_dodge(width = 1), width=0.8) + 
+  theme_bw() +
+  ggtitle('Normal SNAP vs OCT') + ylab(NULL) + xlab("Log2 Fold-Change") +
+  theme(axis.text=element_text(size=20),
+        axis.title=element_text(size=25),
+        plot.title=element_text(size = 34, hjust = 0.5),
+        legend.position='none',
+        panel.grid = element_blank(),
+        aspect.ratio=1.7,
+        strip.text=element_text(size = 34, hjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=0.5)) +
+  scale_x_continuous(limits=c(-0.2,2.2), breaks=c(-0.5,0,0.5,1,1.5,2)) +
+  geom_vline(xintercept = 1) +
+  scale_fill_manual(values = 'brown')
+
+
+# BA #
+
+de_ba = as.data.frame(c("HAMP", "UQCR11", "CD14", "MT1G", "AMBP", "TTR", "HPX", "AZGP1", "PON1", "LRG1", "CTH", "C4BPA", 
+"SERPINC1", "ASS1", "MT1H", "ORM1"))
+
+colnames(de_ba) = 'Variable'
+de_ba$log2FC = c(-2.1089960333197400,-1.0384067314835800,-1.0332458232457400,-1.2883943361177500,-1.0942273863998300,-1.1302210783097400,
+          -1.1292336246663000,-1.116150667062870,-1.0266553730666200,-1.0316721349914900,-1.0174025863104900,-1.0050806598363800,
+          -1.0342046204276600,-1.0297452089488900,-1.0415567718093700,-1.1102484983103600)
+de_ba
+de_ba$Color = 'blue'
+
+ggplot(data = de_ba, aes(x = log2FC, y = Variable, fill=Color)) +
+  geom_col(position = position_dodge(width = 1), width=0.8) + 
+  theme_bw() +
+  ggtitle('BA SNAP vs OCT') + ylab(NULL) + xlab("Log2 Fold-Change") +
+  theme(axis.text=element_text(size=20),
+        axis.title=element_text(size=25),
+        plot.title=element_text(size = 34, hjust = 0.5),
+        legend.position='none',
+        panel.grid = element_blank(),
+        aspect.ratio=1.7,
+        strip.text=element_text(size = 34, hjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=0.5)) +
+  scale_x_continuous(limits=c(-2.2,0.2), breaks=c(-2,-1.5,-1,-0.5,0,0.5)) +
+  geom_vline(xintercept = -1) +
+  scale_fill_manual(values = 'blue')
+```
+
