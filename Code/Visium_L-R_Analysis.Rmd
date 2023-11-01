@@ -1,0 +1,520 @@
+---
+title: "Visium L-R analysis"
+author: "Sarah Bangerth"
+date: "2023-10-31"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Set Working Directory
+setwd('/users/sarahbangerth/Desktop/Github/Transcriptomics_technical_optimization/')
+
+# Libraries
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(Seurat)
+library(DropletUtils)
+library(ggplot2)
+library(SeuratDisk)
+
+library(CellChat)
+library(patchwork)
+options(stringsAsFactors = FALSE)
+```
+
+```{r}
+CellChatDB <- CellChatDB.human
+showDatabaseCategory(CellChatDB)
+
+# use all CellChatDB for cell-cell communication analysis
+CellChatDB.use <- CellChatDB # simply use the default CellChatDB
+```
+
+
+# Spatially deconvoluted data
+
+```{r}
+liver_celltrek_normal = LoadH5Seurat("Data/Spatial/liver_celltrek_normal.h5seurat", images=F)
+liver_celltrek_normal@images$image = Read10X_Image(image.dir = "Data/Spatial/Normal_oct/spatial",
+                           filter.matrix = TRUE)
+
+liver_celltrek_ba = LoadH5Seurat("Data/Spatial/liver_celltrek_ba.h5seurat", images=F)
+liver_celltrek_ba@images$image = Read10X_Image(image.dir = "Data/Spatial/BA_oct/spatial",
+                           filter.matrix = TRUE)
+```
+
+Load CellChat object of each dataset and then merge together
+
+```{r}
+##########
+# NORMAL #
+##########
+
+cellchat_normal = createCellChat(object = liver_celltrek_normal, group.by = "celltype", assay='SCT')
+cellchat_normal@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat_normal <- CellChat::subsetData(cellchat_normal) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat_normal <- identifyOverExpressedGenes(cellchat_normal)
+cellchat_normal <- identifyOverExpressedInteractions(cellchat_normal)
+# project gene expression data onto PPI network (optional)
+cellchat_normal <- projectData(cellchat_normal, PPI.human)
+
+cellchat_normal <- computeCommunProb(cellchat_normal)
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat_normal <- filterCommunication(cellchat_normal, min.cells = 10)
+
+# Extract inferred intercellular communication network of each ligand-receptor pair
+df.net_norm <- subsetCommunication(cellchat_normal, slot.name = "net")
+# Extract inferred intercellular communication network of each signaling pathway
+df.netP_norm <- subsetCommunication(cellchat_normal, slot.name = "netP")
+
+cellchat_normal <- computeCommunProbPathway(cellchat_normal)
+cellchat_normal <- aggregateNet(cellchat_normal)
+
+##########
+### BA ###
+##########
+
+cellchat_ba = createCellChat(object = liver_celltrek_ba, group.by = "celltype", assay='SCT')
+# set the used database in the object
+cellchat_ba@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat_ba <- subsetData(cellchat_ba) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat_ba <- identifyOverExpressedGenes(cellchat_ba)
+cellchat_ba <- identifyOverExpressedInteractions(cellchat_ba)
+# project gene expression data onto PPI network (optional)
+cellchat_ba <- projectData(cellchat_ba, PPI.human)
+
+cellchat_ba <- computeCommunProb(cellchat_ba)
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat_ba <- filterCommunication(cellchat_ba, min.cells = 10)
+
+# Extract inferred intercellular communication network of each ligand-receptor pair
+df.net_ba <- subsetCommunication(cellchat_ba, slot.name = "net")
+# Extract inferred intercellular communication network of each signaling pathway
+df.netP_ba <- subsetCommunication(cellchat_ba, slot.name = "netP")
+
+cellchat_ba <- computeCommunProbPathway(cellchat_ba)
+cellchat_ba <- aggregateNet(cellchat_ba)
+
+
+###########
+## MERGE ##
+###########
+
+object.list <- list(Normal = cellchat_normal, BA = cellchat_ba)
+cellchat_sp <- mergeCellChat(object.list, add.names = names(object.list))
+cellchat_sp
+```
+
+Identify the upgulated and down-regulated signaling ligand-receptor pairs
+
+Identify the upregulated and down-regulated signaling ligand-receptor pairs based on the differential gene expression analysis. Specifically, we perform differential expression analysis between normal and BA for each cell group, and then obtain the upregulated and down-regulated signaling based on the fold change of ligands in the sender cells and receptors in the receiver cells.
+
+```{r}
+# define a positive dataset, i.e., the dataset with positive fold change against the other dataset
+pos.dataset = "Normal"
+features.name = pos.dataset
+
+# perform differential expression analysis
+cellchat_sp <- identifyOverExpressedGenes(cellchat_sp, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.1, thresh.p = 1)
+
+# map the results of differential expression analysis onto the inferred cell-cell communications to easily manage/subset the ligand-receptor pairs of interest
+net <- netMappingDEG(cellchat_sp, features.name = features.name)
+
+write_csv(net, "Data/L-R spatial.csv")
+```
+
+# Single nucleus data
+
+```{r}
+sn_normal = LoadH5Seurat("Data/snRNA/sn_normal_labelled.h5seurat")
+sn_ba = LoadH5Seurat("Data/snRNA/sn_ba_labelled.h5seurat", tools=FALSE)
+```
+
+```{r}
+##########
+# NORMAL #
+##########
+
+sn_normal = NormalizeData(sn_normal, assay = 'RNA', normalization.method = "LogNormalize", scale.factor = 10000, margin = 1, verbose = TRUE)
+cellchat_normal = createCellChat(object = sn_normal, group.by = "celltype", assay='RNA')
+cellchat_normal@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat_normal <- CellChat::subsetData(cellchat_normal) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat_normal <- identifyOverExpressedGenes(cellchat_normal)
+cellchat_normal <- identifyOverExpressedInteractions(cellchat_normal)
+# project gene expression data onto PPI network (optional)
+cellchat_normal <- projectData(cellchat_normal, PPI.human)
+
+cellchat_normal <- computeCommunProb(cellchat_normal)
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat_normal <- filterCommunication(cellchat_normal, min.cells = 10)
+
+# Extract inferred intercellular communication network of each ligand-receptor pair
+df.net_norm <- subsetCommunication(cellchat_normal, slot.name = "net")
+# Extract inferred intercellular communication network of each signaling pathway
+df.netP_norm <- subsetCommunication(cellchat_normal, slot.name = "netP")
+
+cellchat_normal <- computeCommunProbPathway(cellchat_normal)
+cellchat_normal <- aggregateNet(cellchat_normal)
+
+##########
+### BA ###
+##########
+
+sn_ba = NormalizeData(sn_ba, assay = 'RNA', normalization.method = "LogNormalize", scale.factor = 10000, margin = 1, verbose = TRUE)
+cellchat_ba = createCellChat(object = sn_ba, group.by = "celltype", assay='RNA')
+# set the used database in the object
+cellchat_ba@DB <- CellChatDB.use
+
+# subset the expression data of signaling genes for saving computation cost
+cellchat_ba <- subsetData(cellchat_ba) # This step is necessary even if using the whole database
+future::plan("multiprocess", workers = 4) # do parallel
+cellchat_ba <- identifyOverExpressedGenes(cellchat_ba)
+cellchat_ba <- identifyOverExpressedInteractions(cellchat_ba)
+# project gene expression data onto PPI network (optional)
+cellchat_ba <- projectData(cellchat_ba, PPI.human)
+cellchat_ba <- computeCommunProb(cellchat_ba)
+# Filter out the cell-cell communication if there are only few number of cells in certain cell groups
+cellchat_ba <- filterCommunication(cellchat_ba, min.cells = 10)
+
+# Extract inferred intercellular communication network of each ligand-receptor pair
+df.net_ba <- subsetCommunication(cellchat_ba, slot.name = "net")
+# Extract inferred intercellular communication network of each signaling pathway
+df.netP_ba <- subsetCommunication(cellchat_ba, slot.name = "netP")
+
+cellchat_ba <- computeCommunProbPathway(cellchat_ba)
+cellchat_ba <- aggregateNet(cellchat_ba)
+
+
+
+###########
+## MERGE ##
+###########
+
+object.list <- list(Normal = cellchat_normal, BA = cellchat_ba)
+cellchat_sn <- mergeCellChat(object.list, add.names = names(object.list))
+cellchat_sn
+```
+
+Identify the upgulated and down-regulated signaling ligand-receptor pairs
+
+Identify the upregulated and down-regulated signaling ligand-receptor pairs based on the differential gene expression analysis. Specifically, we perform differential expression analysis between normal and BA for each cell group, and then obtain the upregulated and down-regulated signaling based on the fold change of ligands in the sender cells and receptors in the receiver cells.
+
+```{r}
+# define a positive dataset, i.e., the dataset with positive fold change against the other dataset
+pos.dataset = "Normal"
+
+features.name = pos.dataset
+# perform differential expression analysis
+cellchat_sn <- identifyOverExpressedGenes(cellchat_sn, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.1, thresh.p = 1)
+
+# map the results of differential expression analysis onto the inferred cell-cell communications to easily manage/subset the ligand-receptor pairs of interest
+net <- netMappingDEG(cellchat_sn, features.name = features.name)
+
+write_csv(net,"Data/L-R snRNA.csv")
+```
+
+
+# Compare L-R interactions in snRNA vs Spatial
+
+```{r}
+lr_sn = read_csv("Data/L-R snRNA.csv")
+lr_spatial = read_csv("Data/L-R spatial.csv")
+
+#########
+# snRNA #
+#########
+
+sn_ba_up = unique((lr_sn %>% dplyr::filter((datasets=='BA')&
+                        (ligand.logFC>0.1)&(receptor.logFC>0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05))))
+
+sn_norm_up = unique((lr_sn %>% dplyr::filter((datasets=='Normal')&
+                        (ligand.logFC>0.1)&(receptor.logFC>0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05)))$interaction_name)
+
+# L-R pairs upregulated in BA but not in Normal
+sn_ba_up[!sn_ba_up$interaction_name %in% sn_norm_up,]
+pairLR.use.up = sn_ba_up[!sn_ba_up$interaction_name %in% sn_norm_up,]
+
+
+
+sn_ba_down = unique((lr_sn %>% dplyr::filter((datasets=='BA')&
+                        (ligand.logFC<-0.1)&(receptor.logFC<-0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05))))
+
+sn_norm_down = unique((lr_sn %>% dplyr::filter((datasets=='Normal')&
+                        (ligand.logFC<-0.1)&(receptor.logFC<-0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05)))$interaction_name)
+
+# L-R pairs downregulated in BA but not in Normal
+sn_ba_down[!sn_ba_down$interaction_name %in% sn_norm_down,]
+pairLR.down_sn = sn_ba_down[!sn_ba_down$interaction_name %in% sn_norm_down,]
+
+pairLR.down_sn$Source.Target = paste(pairLR.down_sn$source,pairLR.down_sn$target,sep=' -> ')
+
+ggplot(pairLR.down_sn, 
+       aes(Source.Target,interaction_name_2, fill = prob, size = pval
+           )) +
+  geom_point(shape = 21, stroke = 0) +
+  scale_fill_continuous(type='viridis') +
+  theme_bw() + 
+  theme(legend.position = "bottom", 
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        axis.text = element_text(size=10),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=0.5)) +
+  guides(size = guide_legend(override.aes = list(fill = NA, color = "black", stroke = .25), 
+                             label.position = "bottom",
+                             title.position = "right", 
+                             order = 1),
+         fill = guide_colorbar(ticks.colour = NA, title.position = "top", order = 2))
+
+
+###########
+# spatial #
+###########
+
+sp_ba_up = unique((lr_spatial %>% dplyr::filter((datasets=='BA')&
+                        (ligand.logFC>0.1)&(receptor.logFC>0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05))))
+
+sp_norm_up = unique((lr_spatial %>% dplyr::filter((datasets=='Normal')&
+                        (ligand.logFC>0.1)&(receptor.logFC>0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05)))$interaction_name)
+
+# L-R pairs upregulated in BA but not in Normal
+sp_ba_up[!sp_ba_up$interaction_name %in% sp_norm_up,]
+pairLR.use.up = sp_ba_up[!sp_ba_up$interaction_name %in% sp_norm_up,]
+
+pairLR.use.up$Source.Target = paste(pairLR.use.up$source,pairLR.use.up$target,sep=' -> ')
+
+ggplot(pairLR.use.up, 
+       aes(Source.Target,interaction_name_2, fill = prob, size = pval
+           )) +
+  geom_point(shape = 21, stroke = 0) +
+  scale_fill_continuous(type='viridis') +
+  theme_bw() + 
+  theme(legend.position = "bottom", 
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        axis.text = element_text(size=10),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=0.5)) +
+  guides(size = guide_legend(override.aes = list(fill = NA, color = "black", stroke = .25), 
+                             label.position = "bottom",
+                             title.position = "right", 
+                             order = 1),
+         fill = guide_colorbar(ticks.colour = NA, title.position = "top", order = 2))
+
+
+sp_ba_down = unique((lr_spatial %>% dplyr::filter((datasets=='BA')&
+                        (ligand.logFC<-0.1)&(receptor.logFC<-0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05))))
+
+sp_norm_down = unique((lr_spatial %>% dplyr::filter((datasets=='Normal')&
+                        (ligand.logFC<-0.1)&(receptor.logFC<-0.1)&
+                        (receptor.pvalues<0.05)&(ligand.pvalues<0.05)))$interaction_name)
+
+# L-R pairs downregulated in BA but not in Normal
+sp_ba_down[!sp_ba_down$interaction_name %in% sp_norm_down,]
+pairLR.down_sp = sp_ba_down[!sp_ba_down$interaction_name %in% sp_norm_down,]
+
+pairLR.down_sp$Source.Target = paste(pairLR.down_sp$source,pairLR.down_sp$target,sep=' -> ')
+
+ggplot(pairLR.down_sp, 
+       aes(Source.Target,interaction_name_2, fill = prob, size = pval
+           )) +
+  geom_point(shape = 21, stroke = 0) +
+  scale_fill_continuous(type='viridis') +
+  theme_bw() +
+  theme(legend.position = "bottom", 
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        axis.text = element_text(size=10),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=0.5)) +
+  guides(size = guide_legend(override.aes = list(fill = NA, color = "black", stroke = .25), 
+                             label.position = "bottom",
+                             title.position = "right", 
+                             order = 1),
+         fill = guide_colorbar(ticks.colour = NA, title.position = "top", order = 2))
+
+
+#########
+# MERGE #
+#########
+
+pairLR_combined = merge(pairLR.down_sp, pairLR.down_sn, by=c('interaction_name_2','source','target'), all=T)
+
+pairLR_combined = pairLR_combined %>% dplyr::mutate(Group = case_when(is.na(prob.x) == T ~ 'snRNA',
+                                                    is.na(prob.y) == T ~ 'Spatial',
+                                                    (is.na(prob.x)==F)&(is.na(prob.y)==F) ~ 'Both'))
+
+pairLR_combined$Group = factor(pairLR_combined$Group)
+
+pairLR_combined$Source.Target = paste(pairLR_combined$source,pairLR_combined$target,sep=' -> ')
+
+# [Fig 6a]
+ggplot(pairLR_combined, 
+       aes(Source.Target,interaction_name_2, fill = Group
+           )) +
+  geom_point(shape = 21, stroke = 0, size=5) +
+  scale_fill_manual(values = c('red',"#313695","#FFEA00")) +
+  theme_bw() + 
+  theme(legend.position = "bottom", 
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        axis.text = element_text(size=13),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+head(pairLR_combined)
+
+pairLR_combined$Prob_FC = pairLR_combined$prob.x - pairLR_combined$prob.y
+pairLR_combined$Relative_Change = (pairLR_combined$prob.x - pairLR_combined$prob.y)/pairLR_combined$prob.y
+
+pairLR_combined = pairLR_combined %>% mutate(Color = case_when(Prob_FC > 0 ~ 'UP',
+                                                         Prob_FC < 0 ~ 'DOWN',
+                                                         Prob_FC == 0 ~ 'NONE'))
+
+pairLR_combined = pairLR_combined %>% mutate(ColorRC = case_when(Relative_Change > 0 ~ 'UP',
+                                                         Relative_Change < 0 ~ 'DOWN',
+                                                         Relative_Change == 0 ~ 'NONE'))
+
+
+pairLR_combined$Plot_Name = paste(pairLR_combined$interaction_name_2, "\n(", pairLR_combined$Source.Target, ")", sep="")
+# [Fig 6e]
+ggplot(data = pairLR_combined[pairLR_combined$Group=='Both',],
+                       aes(x = Plot_Name, y = Relative_Change,
+                           fill=ColorRC)) +
+  geom_col(position = position_dodge(width = 0.8), width=0.8) +
+  theme_bw() +
+  ggtitle(NULL) + xlab("") + ylab("Relative change (%)") +
+  theme(axis.text=element_text(size=13),
+        axis.title=element_text(size=20),
+        plot.title=element_text(size = 34, hjust = 0.5),
+        panel.grid=element_blank(),
+        legend.position='none',
+        aspect.ratio=0.3,
+        strip.text=element_text(size = 34, hjust = 0.5),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  geom_hline(yintercept = 0, color="black", lwd=1) +
+  scale_fill_manual(values = c("#313695","#FFEA00"))
+
+
+
+# [Fig 6b]
+cor(pairLR_combined[pairLR_combined$Group=='Both',]$`prob.x`, pairLR_combined[pairLR_combined$Group=='Both',]$prob.y,
+    method='spearman')
+#r=0.57
+
+summary(pairLR_combined$Group)
+
+df_LR = as.data.frame(c('Both','snRNA','Spatial'))
+colnames(df_LR) = 'Type'
+df_LR$value = c(34.5,14.5,51)
+
+df_LR$labels = round(100 * df_LR$value/sum(df_LR$value), 2)
+library(ggrepel)
+ggplot(data = df_LR, 
+       aes(x = "", y=value, 
+           fill = Type)) +
+  geom_col(color = "black") +
+  coord_polar(theta="y") +
+  ggtitle(NULL) + xlab(NULL) + ylab(NULL) +
+  theme_void() +
+  theme(axis.text=element_blank(),
+        axis.title=element_text(size=22),
+        plot.title=element_text(size = 22, hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text=element_text(size=30),
+        aspect.ratio=1,
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  scale_fill_manual(values=c('red',"#313695","#FFEA00"))
+```
+
+```{r}
+############################################
+# Visualize cell types pairwise [Fig 5c-d] #
+#############################################
+
+## HSC - Kupffer
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('HSC/Fibroblasts','Kupffer Cells')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#8b008b","#ff00ff"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('HSC/Fibroblasts','Kupffer Cells')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#8b008b","#ff00ff"))
+
+
+## LSEC Zone 2&3 1 - LSEC Zone 2&3 2
+temp1 = liver_celltrek_ba[,liver_celltrek_ba@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 1','LSEC Zone 2&3 2')]
+SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = c("#0096FF","#FF7518"))
+
+temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
+                  c('LSEC Zone 2&3 1','LSEC Zone 2&3 2')]
+SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#0096FF","#FF7518"))
+
+
+#######################################
+# Visualize genes pairwise [Fig 5c-d] #
+#######################################
+
+cscale <- c("mistyrose", "red", "darkred", "black")
+
+
+p1=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['FGF23',] > 0], 
+                      features = c("FGF23"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['FGFR1',] > 0], 
+                      features = c("FGFR1"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+
+p1=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['FGF23',] > 0], 
+                      features = c("FGF23"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['FGFR1',] > 0], 
+                      features = c("FGFR1"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+
+
+
+p1=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['LAMC3',] > 0], 
+                      features = c("LAMC3"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['CD44',] > 0], 
+                      features = c("CD44"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+
+p1=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['LAMC3',] > 0], 
+                      features = c("LAMC3"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['CD44',] > 0], 
+                      features = c("CD44"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+```
+
+
