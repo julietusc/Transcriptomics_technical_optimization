@@ -1,0 +1,301 @@
+from_label,to_label,value
+B/Plasma Cells,B/Plasma Cells,0
+Cholangiocytes,B/Plasma Cells,0
+CV 1,B/Plasma Cells,0
+CV 2,B/Plasma Cells,0.65
+Endothelial Progenitor,B/Plasma Cells,0
+Hepatocyte Progenitor,B/Plasma Cells,0.1
+HSC/Fibroblasts,B/Plasma Cells,0
+IZ 1,B/Plasma Cells,0
+IZ 2,B/Plasma Cells,0
+IZ 3,B/Plasma Cells,0
+IZ 4,B/Plasma Cells,0
+IZ 5,B/Plasma Cells,0
+IZ 6,B/Plasma Cells,0
+Kupffer Cells,B/Plasma Cells,0.7
+LSEC Zone 1,B/Plasma Cells,0
+LSEC Zone 2&3 1,B/Plasma Cells,0.65
+LSEC Zone 2&3 2,B/Plasma Cells,0
+LSEC Zone 2&3 3,B/Plasma Cells,0
+Portal Endothelial,B/Plasma Cells,0
+PP 1,B/Plasma Cells,0.05
+PP 2,B/Plasma Cells,0.15
+PP 3,B/Plasma Cells,0
+PP 4,B/Plasma Cells,0
+T/NK Cells,B/Plasma Cells,0.25
+Cholangiocytes,Cholangiocytes,0
+CV 1,Cholangiocytes,0.3
+CV 2,Cholangiocytes,0
+Endothelial Progenitor,Cholangiocytes,0
+Hepatocyte Progenitor,Cholangiocytes,0
+HSC/Fibroblasts,Cholangiocytes,0.2
+IZ 1,Cholangiocytes,0
+IZ 2,Cholangiocytes,0.05
+IZ 3,Cholangiocytes,0.1
+IZ 4,Cholangiocytes,0.1
+IZ 5,Cholangiocytes,0
+IZ 6,Cholangiocytes,0.6
+Kupffer Cells,Cholangiocytes,0.1
+LSEC Zone 1,Cholangiocytes,0
+LSEC Zone 2&3 1,Cholangiocytes,0.65
+LSEC Zone 2&3 2,Cholangiocytes,0
+LSEC Zone 2&3 3,Cholangiocytes,0.75
+Portal Endothelial,Cholangiocytes,0.7
+PP 1,Cholangiocytes,0.4
+PP 2,Cholangiocytes,0
+PP 3,Cholangiocytes,0
+PP 4,Cholangiocytes,0.05
+T/NK Cells,Cholangiocytes,0
+CV 1,CV 1,0
+CV 2,CV 1,1
+Endothelial Progenitor,CV 1,0
+Hepatocyte Progenitor,CV 1,0
+HSC/Fibroblasts,CV 1,0
+IZ 1,CV 1,0.85
+IZ 2,CV 1,0
+IZ 3,CV 1,0
+IZ 4,CV 1,0
+IZ 5,CV 1,0
+IZ 6,CV 1,0
+Kupffer Cells,CV 1,0
+LSEC Zone 1,CV 1,0
+LSEC Zone 2&3 1,CV 1,0
+LSEC Zone 2&3 2,CV 1,0
+LSEC Zone 2&3 3,CV 1,0
+Portal Endothelial,CV 1,0
+PP 1,CV 1,0.05
+PP 2,CV 1,0
+PP 3,CV 1,0
+PP 4,CV 1,0
+T/NK Cells,CV 1,0
+CV 2,CV 2,0
+Endothelial Progenitor,CV 2,0
+Hepatocyte Progenitor,CV 2,0
+HSC/Fibroblasts,CV 2,0
+IZ 1,CV 2,0
+IZ 2,CV 2,0
+IZ 3,CV 2,0
+IZ 4,CV 2,0.25
+IZ 5,CV 2,0
+IZ 6,CV 2,0
+Kupffer Cells,CV 2,0
+LSEC Zone 1,CV 2,0
+LSEC Zone 2&3 1,CV 2,0
+LSEC Zone 2&3 2,CV 2,0
+LSEC Zone 2&3 3,CV 2,0
+Portal Endothelial,CV 2,0
+PP 1,CV 2,0
+PP 2,CV 2,0
+PP 3,CV 2,0
+PP 4,CV 2,0
+T/NK Cells,CV 2,0
+Endothelial Progenitor,Endothelial Progenitor,0
+Hepatocyte Progenitor,Endothelial Progenitor,0
+HSC/Fibroblasts,Endothelial Progenitor,0
+IZ 1,Endothelial Progenitor,0.05
+IZ 2,Endothelial Progenitor,0
+IZ 3,Endothelial Progenitor,0
+IZ 4,Endothelial Progenitor,0
+IZ 5,Endothelial Progenitor,0
+IZ 6,Endothelial Progenitor,0
+Kupffer Cells,Endothelial Progenitor,0
+LSEC Zone 1,Endothelial Progenitor,0
+LSEC Zone 2&3 1,Endothelial Progenitor,0.15
+LSEC Zone 2&3 2,Endothelial Progenitor,0.35
+LSEC Zone 2&3 3,Endothelial Progenitor,0.1
+Portal Endothelial,Endothelial Progenitor,0
+PP 1,Endothelial Progenitor,0.2
+PP 2,Endothelial Progenitor,0.25
+PP 3,Endothelial Progenitor,0
+PP 4,Endothelial Progenitor,0
+T/NK Cells,Endothelial Progenitor,0
+Hepatocyte Progenitor,Hepatocyte Progenitor,0
+HSC/Fibroblasts,Hepatocyte Progenitor,0
+IZ 1,Hepatocyte Progenitor,0.15
+IZ 2,Hepatocyte Progenitor,0
+IZ 3,Hepatocyte Progenitor,0
+IZ 4,Hepatocyte Progenitor,0
+IZ 5,Hepatocyte Progenitor,0
+IZ 6,Hepatocyte Progenitor,0
+Kupffer Cells,Hepatocyte Progenitor,0
+LSEC Zone 1,Hepatocyte Progenitor,0
+LSEC Zone 2&3 1,Hepatocyte Progenitor,0.35
+LSEC Zone 2&3 2,Hepatocyte Progenitor,0
+LSEC Zone 2&3 3,Hepatocyte Progenitor,0
+Portal Endothelial,Hepatocyte Progenitor,0
+PP 1,Hepatocyte Progenitor,0.35
+PP 2,Hepatocyte Progenitor,0.25
+PP 3,Hepatocyte Progenitor,0
+PP 4,Hepatocyte Progenitor,0
+T/NK Cells,Hepatocyte Progenitor,0
+HSC/Fibroblasts,HSC/Fibroblasts,0
+IZ 1,HSC/Fibroblasts,0
+IZ 2,HSC/Fibroblasts,0
+IZ 3,HSC/Fibroblasts,0
+IZ 4,HSC/Fibroblasts,0
+IZ 5,HSC/Fibroblasts,0
+IZ 6,HSC/Fibroblasts,0
+Kupffer Cells,HSC/Fibroblasts,0
+LSEC Zone 1,HSC/Fibroblasts,0
+LSEC Zone 2&3 1,HSC/Fibroblasts,0.8
+LSEC Zone 2&3 2,HSC/Fibroblasts,0
+LSEC Zone 2&3 3,HSC/Fibroblasts,0
+Portal Endothelial,HSC/Fibroblasts,0
+PP 1,HSC/Fibroblasts,0
+PP 2,HSC/Fibroblasts,0.05
+PP 3,HSC/Fibroblasts,0.05
+PP 4,HSC/Fibroblasts,0
+T/NK Cells,HSC/Fibroblasts,0.1
+IZ 1,IZ 1,0
+IZ 2,IZ 1,0.35
+IZ 3,IZ 1,0
+IZ 4,IZ 1,0
+IZ 5,IZ 1,0
+IZ 6,IZ 1,0
+Kupffer Cells,IZ 1,0
+LSEC Zone 1,IZ 1,0
+LSEC Zone 2&3 1,IZ 1,0
+LSEC Zone 2&3 2,IZ 1,0
+LSEC Zone 2&3 3,IZ 1,0
+Portal Endothelial,IZ 1,0
+PP 1,IZ 1,0.85
+PP 2,IZ 1,0.05
+PP 3,IZ 1,0
+PP 4,IZ 1,0
+T/NK Cells,IZ 1,0
+IZ 2,IZ 2,0
+IZ 3,IZ 2,0.25
+IZ 4,IZ 2,0.15
+IZ 5,IZ 2,0
+IZ 6,IZ 2,0
+Kupffer Cells,IZ 2,0
+LSEC Zone 1,IZ 2,0
+LSEC Zone 2&3 1,IZ 2,0
+LSEC Zone 2&3 2,IZ 2,0
+LSEC Zone 2&3 3,IZ 2,0
+Portal Endothelial,IZ 2,0
+PP 1,IZ 2,0.1
+PP 2,IZ 2,0
+PP 3,IZ 2,0
+PP 4,IZ 2,0.3
+T/NK Cells,IZ 2,0
+IZ 3,IZ 3,0
+IZ 4,IZ 3,0.35
+IZ 5,IZ 3,0
+IZ 6,IZ 3,0
+Kupffer Cells,IZ 3,0
+LSEC Zone 1,IZ 3,0
+LSEC Zone 2&3 1,IZ 3,0
+LSEC Zone 2&3 2,IZ 3,0
+LSEC Zone 2&3 3,IZ 3,0
+Portal Endothelial,IZ 3,0
+PP 1,IZ 3,0.1
+PP 2,IZ 3,0.25
+PP 3,IZ 3,0.05
+PP 4,IZ 3,0.85
+T/NK Cells,IZ 3,0
+IZ 4,IZ 4,0
+IZ 5,IZ 4,0.65
+IZ 6,IZ 4,0
+Kupffer Cells,IZ 4,0
+LSEC Zone 1,IZ 4,0
+LSEC Zone 2&3 1,IZ 4,0
+LSEC Zone 2&3 2,IZ 4,0
+LSEC Zone 2&3 3,IZ 4,0
+Portal Endothelial,IZ 4,0
+PP 1,IZ 4,0
+PP 2,IZ 4,0
+PP 3,IZ 4,0
+PP 4,IZ 4,0
+T/NK Cells,IZ 4,0
+IZ 5,IZ 5,0
+IZ 6,IZ 5,0
+Kupffer Cells,IZ 5,0
+LSEC Zone 1,IZ 5,0
+LSEC Zone 2&3 1,IZ 5,0.3
+LSEC Zone 2&3 2,IZ 5,0
+LSEC Zone 2&3 3,IZ 5,0
+Portal Endothelial,IZ 5,0
+PP 1,IZ 5,0.05
+PP 2,IZ 5,0.15
+PP 3,IZ 5,0
+PP 4,IZ 5,0
+T/NK Cells,IZ 5,0
+IZ 6,IZ 6,0
+Kupffer Cells,IZ 6,0
+LSEC Zone 1,IZ 6,0
+LSEC Zone 2&3 1,IZ 6,0
+LSEC Zone 2&3 2,IZ 6,0
+LSEC Zone 2&3 3,IZ 6,0
+Portal Endothelial,IZ 6,0
+PP 1,IZ 6,0
+PP 2,IZ 6,0
+PP 3,IZ 6,0.3
+PP 4,IZ 6,0.5
+T/NK Cells,IZ 6,0
+Kupffer Cells,Kupffer Cells,0
+LSEC Zone 1,Kupffer Cells,0
+LSEC Zone 2&3 1,Kupffer Cells,0.1
+LSEC Zone 2&3 2,Kupffer Cells,0
+LSEC Zone 2&3 3,Kupffer Cells,0
+Portal Endothelial,Kupffer Cells,0
+PP 1,Kupffer Cells,0
+PP 2,Kupffer Cells,0.15
+PP 3,Kupffer Cells,0
+PP 4,Kupffer Cells,0
+T/NK Cells,Kupffer Cells,0.05
+LSEC Zone 1,LSEC Zone 1,0
+LSEC Zone 2&3 1,LSEC Zone 1,0.25
+LSEC Zone 2&3 2,LSEC Zone 1,0
+LSEC Zone 2&3 3,LSEC Zone 1,0.1
+Portal Endothelial,LSEC Zone 1,0.85
+PP 1,LSEC Zone 1,0.05
+PP 2,LSEC Zone 1,0
+PP 3,LSEC Zone 1,0.05
+PP 4,LSEC Zone 1,0
+T/NK Cells,LSEC Zone 1,0.6
+LSEC Zone 2&3 1,LSEC Zone 2&3 1,0
+LSEC Zone 2&3 2,LSEC Zone 2&3 1,0.85
+LSEC Zone 2&3 3,LSEC Zone 2&3 1,0.25
+Portal Endothelial,LSEC Zone 2&3 1,0
+PP 1,LSEC Zone 2&3 1,0
+PP 2,LSEC Zone 2&3 1,0
+PP 3,LSEC Zone 2&3 1,0
+PP 4,LSEC Zone 2&3 1,0
+T/NK Cells,LSEC Zone 2&3 1,0
+LSEC Zone 2&3 2,LSEC Zone 2&3 2,0
+LSEC Zone 2&3 3,LSEC Zone 2&3 2,0.15
+Portal Endothelial,LSEC Zone 2&3 2,0
+PP 1,LSEC Zone 2&3 2,0
+PP 2,LSEC Zone 2&3 2,0
+PP 3,LSEC Zone 2&3 2,0
+PP 4,LSEC Zone 2&3 2,0
+T/NK Cells,LSEC Zone 2&3 2,0
+LSEC Zone 2&3 3,LSEC Zone 2&3 3,0
+Portal Endothelial,LSEC Zone 2&3 3,0
+PP 1,LSEC Zone 2&3 3,0
+PP 2,LSEC Zone 2&3 3,0
+PP 3,LSEC Zone 2&3 3,0
+PP 4,LSEC Zone 2&3 3,0
+T/NK Cells,LSEC Zone 2&3 3,0
+Portal Endothelial,Portal Endothelial,0
+PP 1,Portal Endothelial,0
+PP 2,Portal Endothelial,0
+PP 3,Portal Endothelial,0
+PP 4,Portal Endothelial,0
+T/NK Cells,Portal Endothelial,0
+PP 1,PP 1,0
+PP 2,PP 1,0.95
+PP 3,PP 1,0
+PP 4,PP 1,0
+T/NK Cells,PP 1,0
+PP 2,PP 2,0
+PP 3,PP 2,0.75
+PP 4,PP 2,0
+T/NK Cells,PP 2,0
+PP 3,PP 3,0
+PP 4,PP 3,0.35
+T/NK Cells,PP 3,0
+PP 4,PP 4,0
+T/NK Cells,PP 4,0
+T/NK Cells,T/NK Cells,0
