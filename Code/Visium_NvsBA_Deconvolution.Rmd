@@ -125,13 +125,13 @@ spatial_ba = FindVariableFeatures(spatial_ba, selection.method = "vst", nfeature
 # Load labelled snRNA data
 
 ```{r}
-liver_sc_normal = LoadH5Seurat("Data/snRNA/sn_normal_labelled.h5seurat")
-liver_sc_ba = LoadH5Seurat("Data/snRNA/sn_ba_labelled.h5seurat", tools=FALSE)
+liver_sc_normal = LoadH5Seurat("/users/sarahbangerth/Desktop/Github/sn_normal_labelled.h5seurat")
+liver_sc_ba = LoadH5Seurat("/users/sarahbangerth/Desktop/Github/sn_ba_labelled.h5seurat", tools=FALSE)
 ```
 
-# DECONVOLUTION
+# SINGLE-CELL SPATIAL MAPPING
 
-Get data ready for deconvolution
+Get data ready
 
 ```{r}
 spatial_norm <- RenameCells(spatial_norm, new.names=make.names(Cells(spatial_norm)))
@@ -154,7 +154,7 @@ liver_sc_ba[['SCT']]@SCTModel.list$model1 = NULL
 ```
 
 ## CellTrek
-CellTrek is a package to deconvolute the spatial spots with the single nucleus data. This assigns the most likely nucleus to a spatial spot. GitHub: https://github.com/navinlabcode/CellTrek
+CellTrek is a package to map single-cell data to the spatial spots. This assigns the most likely nucleus to a spatial spot. GitHub: https://github.com/navinlabcode/CellTrek
 
 Output: nuclei / cells are given spatial coordinates on the tissue sample. 
 

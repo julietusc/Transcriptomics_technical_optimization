@@ -45,9 +45,17 @@ liver_celltrek_normal = LoadH5Seurat("Data/Spatial/liver_celltrek_normal.h5seura
 liver_celltrek_normal@images$image = Read10X_Image(image.dir = "Data/Spatial/Normal_oct/spatial",
                            filter.matrix = TRUE)
 
+# liver_celltrek_normal = LoadH5Seurat("liver_celltrek_normal_SNAP.h5seurat", images=F)
+# liver_celltrek_normal@images$image = Read10X_Image(image.dir = "Data/Spatial/Normal_snap/spatial",
+#                            filter.matrix = TRUE)
+
 liver_celltrek_ba = LoadH5Seurat("Data/Spatial/liver_celltrek_ba.h5seurat", images=F)
 liver_celltrek_ba@images$image = Read10X_Image(image.dir = "Data/Spatial/BA_oct/spatial",
                            filter.matrix = TRUE)
+
+# liver_celltrek_ba = LoadH5Seurat("liver_celltrek_ba_SNAP.h5seurat", images=F)
+# liver_celltrek_ba@images$image = Read10X_Image(image.dir = "Data/Spatial/BA_snap/spatial",
+#                            filter.matrix = TRUE)
 ```
 
 Load CellChat object of each dataset and then merge together
@@ -56,19 +64,51 @@ Load CellChat object of each dataset and then merge together
 ##########
 # NORMAL #
 ##########
+# cellchat_normal = createCellChat(object = data.input.norm, meta = meta.norm, group.by = "labels", assay='SCT',
+#                            datatype = "spatial", coordinates = spatial.locs.norm, scale.factors = scale.factors.norm)
 
 cellchat_normal = createCellChat(object = liver_celltrek_normal, group.by = "celltype", assay='SCT')
 cellchat_normal@DB <- CellChatDB.use
 
 # subset the expression data of signaling genes for saving computation cost
 cellchat_normal <- CellChat::subsetData(cellchat_normal) # This step is necessary even if using the whole database
-future::plan("multiprocess", workers = 4) # do parallel
+future::plan("multisession", workers = 4) # do parallel
 cellchat_normal <- identifyOverExpressedGenes(cellchat_normal)
 cellchat_normal <- identifyOverExpressedInteractions(cellchat_normal)
 # project gene expression data onto PPI network (optional)
 cellchat_normal <- projectData(cellchat_normal, PPI.human)
 
-cellchat_normal <- computeCommunProb(cellchat_normal)
+# cellchat_normal@data@x[is.na(cellchat_normal@data@x)]
+# cellchat_normal@data.signaling@p[is.na(cellchat_normal@data.signaling@p)]
+# 
+# cellchat_normal@data@p[!is.finite(cellchat_normal@data@p)]
+# cellchat_normal@data.signaling@p[!is.finite(cellchat_normal@data.signaling@p)]
+
+# data = as.matrix(cellchat_normal@data.signaling)
+# pairLR.use <- cellchat_normal@LR$LRsig
+# 
+# data.use <- data/max(data)
+# group <- cellchat_normal@idents
+# complex_input <- cellchat_normal@DB$complex
+# cofactor_input <- cellchat_normal@DB$cofactor
+# pairLRsig <- pairLR.use
+# group <- cellchat_normal@idents
+# geneL <- as.character(pairLRsig$ligand)
+# geneR <- as.character(pairLRsig$receptor)
+# nLR <- nrow(pairLRsig)
+# numCluster <- nlevels(group)
+# 
+# # compute the average expression per group
+# data.use.avg <- aggregate(t(data.use), list(group), FUN = triMean)
+# data.use.avg <- t(data.use.avg[,-1])
+# colnames(data.use.avg) <- levels(group)
+# 
+
+
+
+# cellchat_normal <- CellChat::computeCommunProb(cellchat_normal, type='triMean', raw.use=T, distance.use = TRUE)
+cellchat_normal <- CellChat::computeCommunProb(cellchat_normal)
+
 # Filter out the cell-cell communication if there are only few number of cells in certain cell groups
 cellchat_normal <- filterCommunication(cellchat_normal, min.cells = 10)
 
@@ -84,19 +124,25 @@ cellchat_normal <- aggregateNet(cellchat_normal)
 ### BA ###
 ##########
 
+# cellchat_ba = createCellChat(object = data.input.ba, meta = meta.ba, group.by = "labels",
+#                            datatype = "spatial", coordinates = spatial.locs.ba, scale.factors = scale.factors.ba)
+
 cellchat_ba = createCellChat(object = liver_celltrek_ba, group.by = "celltype", assay='SCT')
-# set the used database in the object
+
+#set the used database in the object
 cellchat_ba@DB <- CellChatDB.use
 
 # subset the expression data of signaling genes for saving computation cost
-cellchat_ba <- subsetData(cellchat_ba) # This step is necessary even if using the whole database
-future::plan("multiprocess", workers = 4) # do parallel
+cellchat_ba <- CellChat::subsetData(cellchat_ba) # This step is necessary even if using the whole database
+future::plan("multisession", workers = 4) # do parallel
 cellchat_ba <- identifyOverExpressedGenes(cellchat_ba)
 cellchat_ba <- identifyOverExpressedInteractions(cellchat_ba)
 # project gene expression data onto PPI network (optional)
 cellchat_ba <- projectData(cellchat_ba, PPI.human)
 
+# cellchat_ba <- computeCommunProb(cellchat_ba, type='triMean', raw.use=F, distance.use = TRUE)
 cellchat_ba <- computeCommunProb(cellchat_ba)
+
 # Filter out the cell-cell communication if there are only few number of cells in certain cell groups
 cellchat_ba <- filterCommunication(cellchat_ba, min.cells = 10)
 
@@ -130,11 +176,28 @@ features.name = pos.dataset
 # perform differential expression analysis
 cellchat_sp <- identifyOverExpressedGenes(cellchat_sp, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.1, thresh.p = 1)
 
+# Of note, compared to CellChat version < v2, CellChat v2 now performs an ultra-fast Wilcoxon test using the presto package, which gives smaller values of logFC. Thus we here set a smaller value of thresh.fc compared to the original one (thresh.fc = 0.1). Users can also provide a vector and dataframe of customized DEGs by modifying the cellchat@var.features$LS and cellchat@var.features$LS.info. 
+cellchat_sp <- identifyOverExpressedGenes(cellchat_sp, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.05, thresh.p = 1) 
+
 # map the results of differential expression analysis onto the inferred cell-cell communications to easily manage/subset the ligand-receptor pairs of interest
 net <- netMappingDEG(cellchat_sp, features.name = features.name)
 
-write_csv(net, "Data/L-R spatial.csv")
+# write_csv(net, "Data/L-R spatial.csv")
+write_csv(net, "L-R spatial OCT.csv")
 ```
+
+```{r}
+# Take an input of a few genes
+spatialFeaturePlot(cellchat, features = c("LAMC3","CD44"), point.size = 0.8, color.heatmap = "Reds", direction = 1)
+
+# Take an input of a ligand-receptor pair
+spatialFeaturePlot(cellchat, pairLR.use = "LAMC3_CD44", point.size = 0.5, do.binary = FALSE, cutoff = 0.05, enriched.only = F, color.heatmap = "Reds", direction = 1)
+
+# Take an input of a ligand-receptor pair and show expression in binary
+spatialFeaturePlot(cellchat, pairLR.use = "LAMC3_CD44", point.size = 0.5, do.binary = TRUE, cutoff = 0.05, enriched.only = F, color.heatmap = "Reds", direction = 1)
+
+```
+
 
 # Single nucleus data
 
@@ -223,6 +286,9 @@ features.name = pos.dataset
 # perform differential expression analysis
 cellchat_sn <- identifyOverExpressedGenes(cellchat_sn, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.1, thresh.p = 1)
 
+# Of note, compared to CellChat version < v2, CellChat v2 now performs an ultra-fast Wilcoxon test using the presto package, which gives smaller values of logFC. Thus we here set a smaller value of thresh.fc compared to the original one (thresh.fc = 0.1). Users can also provide a vector and dataframe of customized DEGs by modifying the cellchat@var.features$LS and cellchat@var.features$LS.info. 
+cellchat <- identifyOverExpressedGenes(cellchat, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.05, thresh.p = 1) 
+
 # map the results of differential expression analysis onto the inferred cell-cell communications to easily manage/subset the ligand-receptor pairs of interest
 net <- netMappingDEG(cellchat_sn, features.name = features.name)
 
@@ -233,8 +299,11 @@ write_csv(net,"Data/L-R snRNA.csv")
 # Compare L-R interactions in snRNA vs Spatial
 
 ```{r}
-lr_sn = read_csv("Data/L-R snRNA.csv")
-lr_spatial = read_csv("Data/L-R spatial.csv")
+lr_sn = read_csv("Data/L-R/L-R_snRNA.csv")
+lr_spatial = read_csv("Data/L-R/L-R_spatial.csv")
+
+# lr_spatial = read_csv("L-R spatial SNAP.csv")
+# lr_sn = read_csv("L-R spatial OCT.csv")
 
 #########
 # snRNA #
@@ -456,6 +525,31 @@ ggplot(data = df_LR,
         axis.ticks.x = element_blank(),
         axis.text.x = element_blank()) +
   scale_fill_manual(values=c('red',"#313695","#FFEA00"))
+
+# [Supplemental figure 2b]
+
+df_LR = as.data.frame(c('Both','OCT','SNAP'))
+colnames(df_LR) = 'Type'
+df_LR$value = c(40,35,25)
+
+df_LR$labels = round(100 * df_LR$value/sum(df_LR$value), 2)
+library(ggrepel)
+ggplot(data = df_LR, 
+       aes(x = "", y=value, 
+           fill = Type)) +
+  geom_col(color = "black") +
+  coord_polar(theta="y") +
+  ggtitle(NULL) + xlab(NULL) + ylab(NULL) +
+  theme_void() +
+  theme(axis.text=element_blank(),
+        axis.title=element_text(size=22),
+        plot.title=element_text(size = 22, hjust = 0.5),
+        legend.title = element_blank(),
+        legend.text=element_text(size=30),
+        aspect.ratio=1,
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  scale_fill_manual(values=c('red',"#313695","#FFEA00"))
 ```
 
 ```{r}
@@ -470,7 +564,7 @@ SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = 
 
 temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
                   c('HSC/Fibroblasts','Kupffer Cells')]
-SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#8b008b","#ff00ff"))
+SpatialDimPlot(temp2, group.by='celltype', crop=T) + scale_fill_manual(values = c("#8b008b","#ff00ff"))
 
 
 ## LSEC Zone 2&3 1 - LSEC Zone 2&3 2
@@ -480,7 +574,7 @@ SpatialDimPlot(temp1, group.by='celltype', crop=F) + scale_fill_manual(values = 
 
 temp2 = liver_celltrek_normal[,liver_celltrek_normal@meta.data$celltype %in% 
                   c('LSEC Zone 2&3 1','LSEC Zone 2&3 2')]
-SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = c("#0096FF","#FF7518"))
+SpatialDimPlot(temp2, group.by='celltype', crop=T) + scale_fill_manual(values = c("#0096FF","#FF7518"))
 
 
 #######################################
@@ -490,30 +584,51 @@ SpatialDimPlot(temp2, group.by='celltype', crop=F) + scale_fill_manual(values = 
 cscale <- c("mistyrose", "red", "darkred", "black")
 
 
-p1=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['FGF23',] > 0], 
-                      features = c("FGF23"), crop=F)  + scale_fill_gradientn(colours=cscale)
-p2=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['FGFR1',] > 0], 
-                      features = c("FGFR1"), crop=F)  + scale_fill_gradientn(colours=cscale)
+# liver_celltrek_normal@meta.data[(liver_celltrek_normal@meta.data$celltype %in% c('Kupffer Cells','HSC/Fibroblasts'))&
+#                                   (liver_celltrek_normal@assays$SCT@data['FGF23',] > 0),]
+# 
+# liver_celltrek_normal[,(liver_celltrek_normal@meta.data$celltype %in% c('Kupffer Cells','HSC/Fibroblasts'))]
+
+p1=SpatialFeaturePlot(liver_celltrek_ba[,(liver_celltrek_ba@meta.data$celltype %in% 
+                                                        c('LSEC Zone 2&3 1','LSEC Zone 2&3 2'))],#&
+                                  #(liver_celltrek_ba@assays$SCT@data['FGF23',] > 0)],
+                      features = c("FGF23"), crop=F)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p2=SpatialFeaturePlot(liver_celltrek_ba[,(liver_celltrek_ba@meta.data$celltype %in% 
+                                                        c('LSEC Zone 2&3 1','LSEC Zone 2&3 2'))],#&
+                                  #(liver_celltrek_ba@assays$SCT@data['FGFR1',] > 0)],
+                      features = c("FGFR1"), crop=F)  + scale_fill_gradientn(colours=cscale, limits=c(0,3))
 p1+p2
 
-p1=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['FGF23',] > 0], 
-                      features = c("FGF23"), crop=F)  + scale_fill_gradientn(colours=cscale)
-p2=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['FGFR1',] > 0], 
-                      features = c("FGFR1"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1=SpatialFeaturePlot(liver_celltrek_normal[,(liver_celltrek_normal@meta.data$celltype %in% 
+                                                        c('LSEC Zone 2&3 1','LSEC Zone 2&3 2'))],#&
+                                  #(liver_celltrek_normal@assays$SCT@data['FGF23',] > 0)],
+                      features = c("FGF23"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p2=SpatialFeaturePlot(liver_celltrek_normal[,(liver_celltrek_normal@meta.data$celltype %in% 
+                                                        c('LSEC Zone 2&3 1','LSEC Zone 2&3 2'))],#&
+                                  #(liver_celltrek_normal@assays$SCT@data['FGFR1',] > 0)],
+                      features = c("FGFR1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,3))
 p1+p2
 
 
 
-p1=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['LAMC3',] > 0], 
-                      features = c("LAMC3"), crop=F)  + scale_fill_gradientn(colours=cscale)
-p2=SpatialFeaturePlot(liver_celltrek_ba[,liver_celltrek_ba@assays$SCT@data['CD44',] > 0], 
-                      features = c("CD44"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1=SpatialFeaturePlot(liver_celltrek_ba[,(liver_celltrek_ba@meta.data$celltype %in% 
+                                                        c('Kupffer Cells','HSC/Fibroblasts'))],#&
+                                  #(liver_celltrek_ba@assays$SCT@data['LAMC3',] > 0)],
+                      features = c("LAMC3"), crop=F)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p2=SpatialFeaturePlot(liver_celltrek_ba[,(liver_celltrek_ba@meta.data$celltype %in% 
+                                                        c('Kupffer Cells','HSC/Fibroblasts'))],#&
+                                  #(liver_celltrek_ba@assays$SCT@data['CD44',] > 0)],
+                      features = c("CD44"), crop=F)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
 p1+p2
 
-p1=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['LAMC3',] > 0], 
-                      features = c("LAMC3"), crop=F)  + scale_fill_gradientn(colours=cscale)
-p2=SpatialFeaturePlot(liver_celltrek_normal[,liver_celltrek_normal@assays$SCT@data['CD44',] > 0], 
-                      features = c("CD44"), crop=F)  + scale_fill_gradientn(colours=cscale)
+p1=SpatialFeaturePlot(liver_celltrek_normal[,(liver_celltrek_normal@meta.data$celltype %in% 
+                                                        c('Kupffer Cells','HSC/Fibroblasts'))],#&
+                                  #(liver_celltrek_normal@assays$SCT@data['LAMC3',] > 0)],
+                      features = c("LAMC3"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p2=SpatialFeaturePlot(liver_celltrek_normal[,(liver_celltrek_normal@meta.data$celltype %in% 
+                                                        c('Kupffer Cells','HSC/Fibroblasts'))],#&
+                                  #(liver_celltrek_normal@assays$SCT@data['CD44',] > 0)],
+                      features = c("CD44"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
 p1+p2
 ```
 

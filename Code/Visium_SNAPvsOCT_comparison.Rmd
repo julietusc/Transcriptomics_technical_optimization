@@ -431,6 +431,7 @@ Normal_snap_oct_all.path_input = Normal_snap_oct_all %>%
   subset(select=c(gene, avg_log2FC, p_val_adj))
 head(Normal_snap_oct_all.path_input)
 
+?run_pathfindR
 input_testing(Normal_snap_oct_all.path_input)
 Normal_snap_oct_all.path_output = run_pathfindR(Normal_snap_oct_all.path_input)
 head(Normal_snap_oct_all.path_output)
@@ -660,5 +661,106 @@ ggplot(data = de_ba, aes(x = log2FC, y = Variable, fill=Color)) +
   scale_x_continuous(limits=c(-2.2,0.2), breaks=c(-2,-1.5,-1,-0.5,0,0.5)) +
   geom_vline(xintercept = -1) +
   scale_fill_manual(values = 'blue')
+```
+
+# Visualize spatial expression of top DEG between SNAP and OCT
+
+```{r}
+cscale <- c("mistyrose", "red", "darkred", "black")
+
+# NORMAL SNAP vs OCT
+p1=SpatialFeaturePlot(spatial_Nsnap,
+                      features = c("DNAJB1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,4))
+p2=SpatialFeaturePlot(spatial_Noct,
+                      features = c("DNAJB1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,4))
+p1+p2
+
+p1=SpatialFeaturePlot(spatial_Nsnap,
+                      features = c("ATF3"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,4))
+p2=SpatialFeaturePlot(spatial_Noct,
+                      features = c("ATF3"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,4))
+p1+p2
+
+p1=SpatialFeaturePlot(spatial_Nsnap,
+                      features = c("PCK1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(1,5))
+p2=SpatialFeaturePlot(spatial_Noct,
+                      features = c("PCK1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(1,5))
+p1+p2
+
+# BA SNAP vs OCT
+
+p1=SpatialFeaturePlot(spatial_BAsnap,
+                      features = c("HAMP"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(1,5))
+p2=SpatialFeaturePlot(spatial_BAoct,
+                      features = c("HAMP"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(1,5))
+p1+p2
+
+p1=SpatialFeaturePlot(spatial_BAsnap,
+                      features = c("MT1G"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(1,6))
+p2=SpatialFeaturePlot(spatial_BAoct,
+                      features = c("MT1G"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(1,6))
+p1+p2
+
+# LAMC3-CD44 expression in normal vs BA OCT on pre-deconvoluted spots (original spots)
+
+p1=SpatialFeaturePlot(spatial_Noct,
+                      features = c("LAMC3"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,3))
+p2=SpatialFeaturePlot(spatial_Noct,
+                      features = c("CD44"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,3))
+p1+p2
+
+p1=SpatialFeaturePlot(spatial_BAoct,
+                      features = c("LAMC3"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,3))
+p2=SpatialFeaturePlot(spatial_BAoct,
+                      features = c("CD44"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,3))
+p1+p2
+
+# FGF23-FGFR1  expression in normal vs BA OCT on pre-deconvoluted spots (original spots)
+
+p1=SpatialFeaturePlot(spatial_Noct,
+                      features = c("FGF23"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p2=SpatialFeaturePlot(spatial_Noct,
+                      features = c("FGFR1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p1+p2
+
+p1=SpatialFeaturePlot(spatial_BAoct,
+                      features = c("FGF23"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p2=SpatialFeaturePlot(spatial_BAoct,
+                      features = c("FGFR1"), crop=T)  + scale_fill_gradientn(colours=cscale, limits=c(0,2))
+p1+p2
+
+
+# LAMC3-CD44 expression in normal vs BA OCT on pre-deconvoluted spots (original spots)
+
+p1=SpatialFeaturePlot(samples_integrated[,samples_integrated@assays$SCT@data['LAMC3',] > 0],
+                      images=c('slice1.3'),
+                      features = c("LAMC3"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(samples_integrated[,samples_integrated@assays$SCT@data['CD44',] > 0],
+                      images=c('slice1.3'),
+                      features = c("CD44"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+
+p1=SpatialFeaturePlot(samples_integrated[,samples_integrated@assays$SCT@data['LAMC3',] > 0],
+                      images=c('slice1.1'),
+                      features = c("LAMC3"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(samples_integrated[,samples_integrated@assays$SCT@data['CD44',] > 0],
+                      images=c('slice1.1'),
+                      features = c("CD44"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+
+# FGF23-FGFR1 expression in normal vs BA OCT on pre-deconvoluted spots (original spots)
+
+p1=SpatialFeaturePlot(samples_integrated[,samples_integrated@assays$integrated@data['FGF23',] > 0],
+                      images=c('slice1.3'),
+                      features = c("FGF23"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(samples_integrated,images=c('slice1.3'),
+                      features = c("FGFR1"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p1+p2
+
+p1=SpatialFeaturePlot(samples_integrated,images=c('slice1.1'),
+                      features = c("FGF23"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p2=SpatialFeaturePlot(samples_integrated,images=c('slice1.1'),
+                      features = c("FGFR1"), crop=T)  + scale_fill_gradientn(colours=cscale)
+p1+p2
 ```
 
